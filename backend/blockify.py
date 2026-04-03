@@ -41,7 +41,7 @@ def blockify_pdf(pdf_path, short_threshold):
 
                     # checks to see if our last iretation was still within the page if so then it is a line so it has a top position
                     if i < len(lines):
-                        gap_to_next = lines[i]["top"] - last_short_bottom
+                        gap_to_next = int(lines[i]["top"] - last_short_bottom)
                     else:
                         gap_to_next = None
                     
@@ -53,7 +53,7 @@ def blockify_pdf(pdf_path, short_threshold):
                     current_line = lines[i]
 
                     if i < len(lines) - 1:
-                        gap_to_next = lines[i + 1]["top"] - current_line["bottom"]
+                        gap_to_next = int(lines[i + 1]["top"] - current_line["bottom"])
                     else:
                         gap_to_next = None
 
@@ -61,8 +61,27 @@ def blockify_pdf(pdf_path, short_threshold):
                     all_blocks.append(block)
                     block_number += 1
                     i += 1
-    gaps = sorted(gaps)
+    
+    link_blocks(all_blocks)
     return all_blocks, gaps
+
+
+def get_gap_threshold(gaps):
+    if not gaps:
+        return None
+
+    gaps = sorted(gaps)
+    n = len(gaps)
+    midpoint = n // 2
+
+    if n % 2 == 1:
+        median = gaps[midpoint]
+    else:
+        median = (gaps[midpoint - 1] + gaps[midpoint]) / 2
+
+    gap_threshold = max(4, int(median) + 1)
+    return gap_threshold
+
 
 
 def link_blocks(blocks):
@@ -78,4 +97,49 @@ def link_blocks(blocks):
             blocks[i].next_block = None
 
 
-#def merge_blocks_by_gap(blocks, gap_threshold):
+
+def merge_blocks_by_gap(blocks, gap_threshold):
+    if not blocks:
+        return
+    
+    current = blocks[0]
+
+    while current is not None:
+
+        if current.gap_to_next is not None and current.gap_to_next <= gap_threshold:
+            merged_block = current.next_block
+            current.merge(merged_block)
+            blocks.remove(merged_block)
+
+        else:
+            current = current.next_block
+
+
+
+def merge_small_blocks(blocks, min_lines):
+    if not blocks:
+        return
+    
+    current = blocks[0]
+
+    while current is not None:
+        if current.next_block is not None and len(current.lines) < min_lines:
+            merged_block = current.next_block
+            current.merge(merged_block)
+            blocks.remove(merged_block)
+        else:
+            current = current.next_block
+
+
+def should_use_gap_rule(gaps):
+    if not gaps:
+        return False
+
+    most_common_count = 0
+
+    for gap in gaps:
+        count = gaps.count(gap)
+        if count > most_common_count:
+            most_common_count = count
+
+    return most_common_count / len(gaps) < 0.90

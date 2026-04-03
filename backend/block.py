@@ -8,7 +8,7 @@ class Block:
         self.page = page
         self.next_block = None
         self.prev_block = None
-        lines = text.splitlines()
+        self.lines = text.splitlines()
 
 
         
