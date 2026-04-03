@@ -37,8 +37,6 @@ YEAR = r"(?:,?\s*\d{4})?"
 DATE_PATTERN = rf"(?:\b{MONTHS}\.?\s+{DAY_RANGE}{YEAR}\b|\b{MONTHS}\.?,\s*{DAY_RANGE}{YEAR}\b|\b{DAY_RANGE},?\s+{MONTHS}\.?{YEAR}\b)"
 
 
-TIME_PATTERN = r'\b\d{1,2}:\d{2}\s*(?:am|pm|AM|PM)\b|\b\d{1,2}\s*(?:am|pm|AM|PM)\b'
-
 TIME_PATTERN = r'\b(?:' \
                r'(?:1[0-2]|0?[1-9])(?::[0-5]\d)?\s?(?:[AaPp]\.?[Mm]\.?)' \
                r'|' \
