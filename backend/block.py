@@ -1,3 +1,5 @@
+import tiktoken
+
 class Block:
 
     def __init__(self, text, number, gap_to_next, page):
@@ -9,6 +11,7 @@ class Block:
         self.next_block = None
         self.prev_block = None
         self.lines = text.splitlines()
+        self.remove_priority = None
 
 
         
@@ -38,3 +41,22 @@ class Block:
         neighbour.prev_block = None
 
         return True
+    
+
+    def set_context_size(self):
+        encoding = tiktoken.get_encoding("cl100k_base")
+        self.context_size = len(encoding.encode(self.text))
+
+
+class Line:
+
+    def __init__(self, text, top, bottom, font_size, font_name, gap_to_next, page):
+        self.text = text
+        self.top = top
+        self.bottom = bottom
+        self.gap_to_next = gap_to_next
+        self.page = page
+        self.font_size = font_size
+        self.font_name = font_name
+        self.is_header = False
+        self.is_junk = False

@@ -2,6 +2,7 @@ import pdfplumber
 from extractor import doc_recognizer
 from parser import word_parser
 from blockify import blockify_pdf, merge_blocks_by_gap, merge_small_blocks, should_use_gap_rule, get_gap_threshold
+from scorer import score_and_size_blocks
 from block import Block
 
 file = r"C:\Users\Navid\Downloads\Syllabi\PSYC221 (ASO) Fall 2025 Syllabus.pdf"
