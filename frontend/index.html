@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src='https://cdn.jsdelivr.net/npm/fullcalendar@6.1.9/index.global.min.js'></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400..700;1,400..700&display=swap" rel="stylesheet">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="style.css">
+  <title>Dashboard</title>
+</head>
+<body>
+
+
+  <nav>
+    <div class="header">Syllabus Extractor
+      <div class="hamburger">
+        <span></span>
+        <span></span>
+        <span></span>
+      </div>
+    </div>
+    <div class="button-area">
+      <div class="main-text">Please upload your syllabus... or don't not like I care. hmph!</div>
+      <button class="drop-button">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
+          <polyline points="17 8 12 3 7 8"/>
+          <line x1="12" y1="3" x2="12" y2="15"/>
+        </svg>
+        Upload Syllabus
+        <input type="file" accept=".pdf" style="display:none"/>
+      </button>
+    </div>
+    
+    <div id="results" style="display:none;">
+      <div id="course-card">
+        <select name="Course" id="drop-menu"></select>
+        <canvas id="pie-chart"></canvas>
+        <div id="legend"></div>
+      </div>
+    </div>
+    <div id="calendar-section" style="display:none;">
+      <div id="calendar-filters">
+        <label><input type="checkbox" value="assessment" checked> Assessments</label>
+        <label><input type="checkbox" value="week" checked> Schedule</label>
+      </div>
+      <div id="calendar"></div>
+    </div>
+    
+    <div id="event-modal" style="display:none;">
+      <div id="modal-overlay"></div>
+      <div id="modal-box">
+        <button id="modal-close">✕</button>
+        <div id="modal-type"></div>
+        <div id="modal-title"></div>
+        <div id="modal-date"></div>
+        <div id="modal-description"></div>
+      </div>
+    </div>
+    <div class="assessment-list" style="display: none;">
+    </div>
+
+
+  </nav>
+
+  
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="app.js"></script>
+</body>
+</html>

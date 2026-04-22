@@ -1,0 +1,242 @@
+body {
+  margin: 0;
+font-family: "Libre Baskerville", serif;
+background-color: #FFEAD3;
+}
+.header {
+    background-color: #D25353;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 80px;
+    padding: 0px 20px;
+    font-size: 30px;
+    font-weight: bold;
+    color: aliceblue;
+    -webkit-text-stroke: 0.4px #9E3B3B;
+    border-bottom: solid;
+    border-width: 2px;
+    box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.3);
+    border-color: #9E3B3B;
+    cursor: pointer;;
+
+}
+
+.hamburger {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  cursor: pointer;
+}
+.hamburger span {
+  display: block;
+  width: 28px;
+  height: 3px;
+  background: white;
+  border-radius: 2px;
+}
+
+.button-area {
+    display: flex;
+    width: 600px;
+    padding: 50px 20px;
+    border-radius: 70px;
+    flex-direction: column; 
+    vertical-align: middle;
+    align-items: center;
+    margin: 200px auto;
+    background-color: #D25353;
+    border: 2px solid black;
+    box-shadow: 0 4px 12px 0 rgba(0, 0, 0, 0.7);
+    
+}
+
+.main-text {
+    font-size: 50px;
+    text-align: center;
+    color: white;
+    padding-bottom: 40px;
+}
+
+.drop-button {
+    padding: 8px 8px;
+    width: 20vh;
+    height: 50px;
+    background-color: #9E3B3B;
+    border: none;
+    font-size: 15px;
+    border-radius: 30px;
+    color: white;
+    cursor: pointer;
+    outline: none;
+}
+.drop-button svg {
+  pointer-events: none;
+}
+
+.drop-button:hover {
+    opacity: 60%;
+    transition-duration: 200ms;
+}
+
+.drop-button:active {
+    filter: brightness(0.2);
+}
+
+#drop-menu {
+  display: none;
+}
+
+#course-card {
+  display: none;
+  display: flex;
+  position: relative;
+  align-items: center;
+  gap: 24px;
+  background: #e21d1dba;
+  border-radius: 16px;
+  padding: 44px;
+  width: fit-content;
+  margin: 60px auto;
+  overflow: hidden;
+}
+
+#pie-wrapper {
+  overflow: hidden;
+}
+
+#legend {
+  opacity: 0;
+  color: white;
+  transform: scale(0.8);
+}
+
+#drop-menu {
+  position: absolute;
+  top: 50px;
+  right: 50px;
+  border: none;
+  padding: 10px;
+  border-radius: 20px;
+  background-color: #ffc0c0c7;
+  font-weight: bold;
+  color: white;
+}
+
+
+
+#legend.animate {
+  animation: slideIn 0.8s ease-out forwards;
+}
+
+@keyframes slideIn {
+  from {
+    opacity: 0;
+    transform: translateX(70px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+#calendar-section {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  vertical-align: middle;
+  width: 60%;
+  margin: 100px auto;
+  padding: 100px;
+  background-color: #e49191;
+  border-radius: 60px;
+}
+
+#calendar {
+  color: white;
+}
+
+.fc .fc-button-primary {
+  background-color: #9E3B3B;
+  border-color: #9E3B3B;
+  color: white;
+}
+
+.fc .fc-button-primary:hover {
+  background-color: #7f2f2f;
+  border-color: #7f2f2f;
+}
+
+#modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.4);
+  z-index: 100;
+}
+
+#modal-box {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: #fff;
+  border-radius: 16px;
+  padding: 32px;
+  z-index: 101;
+  min-width: 300px;
+  animation: popIn 0.3s ease-out forwards;
+}
+
+#modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  background: none;
+  border: none;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+#modal-type {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #9E3B3B;
+  margin-bottom: 8px;
+}
+
+#modal-title {
+  font-size: 20px;
+  font-weight: bold;
+  margin-bottom: 12px;
+}
+
+#modal-date {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 8px;
+}
+
+#modal-description {
+  font-size: 14px;
+  color: #444;
+}
+
+
+.assessment-list {
+  width: 60%;
+  margin: 0 auto 60px auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.assessment-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: #e21d1dba;
+  border-radius: 12px;
+  padding: 16px 24px;
+  color: white;
+}

@@ -1,26 +1,25 @@
-import pdfplumber 
-from extractor import doc_recognizer
+import time
 from parser import word_parser
-from blockify import blockify_pdf, merge_blocks_by_gap, merge_small_blocks, should_use_gap_rule, get_gap_threshold
-from scorer import score_and_size_blocks
-from block import Block
+from scorer import score_and_size_blocks, prune_blocks_to_context_limit
+from extractor import extract_document
+from constants import CONTEXT_SIZES
 
-file = r"C:\Users\Navid\Downloads\Syllabi\PSYC221 (ASO) Fall 2025 Syllabus.pdf"
+file = r"C:\Users\Navid\Downloads\Syllabi\MA238 W26 Course Outline - MA-238-A - Discrete Mathematics.pdf"
 
+t = time.time()
+blocks = extract_document(file)
+print(f"extract_document: {time.time() - t:.2f}s")
 
-text, table = doc_recognizer(file)
-list, gaps = blockify_pdf(file, 60)
-gap_threshold = get_gap_threshold(gaps)
-if should_use_gap_rule(gaps):
-    merge_blocks_by_gap(list, gap_threshold)
-    min_lines = 3
-else:
-    min_lines = 5
-merge_small_blocks(list, min_lines)
+t = time.time()
+score_and_size_blocks(blocks)
+print(f"score_and_size_blocks: {time.time() - t:.2f}s")
 
+t = time.time()
+pruned_blocks = prune_blocks_to_context_limit(blocks, CONTEXT_SIZES["fast"])
+print(f"prune_blocks: {time.time() - t:.2f}s")
 
-for block in list:
-    print('------------------')
-    print(block.text)
+full_text = "\n\n".join(block.text for block in pruned_blocks)
 
-print(len(list))
+t = time.time()
+result = word_parser(full_text, CONTEXT_SIZES["fast"])
+print(f"word_parser: {time.time() - t:.2f}s")

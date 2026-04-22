@@ -1,37 +1,75 @@
-from pydoc import doc
-import pdfplumber, docx2python
+from block import Block
+from docling.document_converter import DocumentConverter, PdfFormatOption
+from docling.datamodel.base_models import InputFormat
+from docling.datamodel.pipeline_options import PdfPipelineOptions, EasyOcrOptions
+from docling.datamodel.accelerator_options import AcceleratorDevice, AcceleratorOptions
 
-def doc_recognizer(file):
-    if file.endswith(".pdf"):
-        return pdf_extractor(file)
-    elif file.endswith(".doc"):
-        return doc_extractor(file)
-    else:
-        return
+
+
+pdf_options = PdfPipelineOptions()
+
+pdf_options.accelerator_options = AcceleratorOptions(
+    device=AcceleratorDevice.CUDA,
+    num_threads=8
+)
+
+pdf_options.do_ocr = True
+pdf_options.do_picture_description = False
+pdf_options.do_picture_classification = False
+pdf_options.generate_page_images = False
+pdf_options.generate_picture_images = False
+
+pdf_options.ocr_options = EasyOcrOptions(
+    use_gpu=True,
+    force_full_page_ocr=True,
+    lang=["en"]
+)
+
+converter = DocumentConverter(
+    format_options={
+        InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options)
+    }
+)
+
+
+def extract_document(file):
+    result = converter.convert(file)
+    doc = result.document
+    print(repr(doc.export_to_text()[:1000]))
     
-def pdf_extractor(file):
-    extracted_text = ""
-    table = []
-    with pdfplumber.open(file) as pdf:
-        for page in pdf.pages:
-            extracted_text += page.extract_text()
-            if page.extract_table():
-                table.extend(page.extract_table())
+    blocks = []
+    
+    for item, level in doc.iterate_items():
+        label = str(item.label)
+        raw_text = getattr(item, "text", None)
 
-    return extracted_text, table
+        print("LABEL:", label)
+        print("RAW TEXT:", repr(raw_text))
+        print("-" * 40)
+        
+        if label == "table":
+            text = extract_table_as_text(item).strip()
+            if text:
+                blocks.append(Block(text, True))
+        else:
+            text = getattr(item, 'text', '').strip()
+            if text:
+                blocks.append(Block(text, False))
+    
+    return blocks
 
+def extract_table_as_text(table_item):
+    cells = table_item.data.table_cells
+    num_rows = table_item.data.num_rows
+    num_cols = table_item.data.num_cols
 
+    grid = [[""] * num_cols for _ in range(num_rows)]
+    for cell in cells:
+        r = cell.start_row_offset_idx
+        c = cell.start_col_offset_idx
+        grid[r][c] = cell.text.strip()
 
-
-def doc_extractor(file):
-    extracted_text = ""
-    with docx2python(file) as docx:
-        for paragraph in docx.paragraphs:
-            extracted_text += paragraph
-        for table in docx.tables:
-            for row in table.rows:
-                line = ""
-                for cell in row.cells:
-                    line += cell.text
-                extracted_text += line + "\n"
-    return extracted_text
+    rows = []
+    for row in grid:
+        rows.append(" | ".join(row))
+    return "\n".join(rows)

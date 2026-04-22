@@ -1,6 +1,4 @@
 import requests
-import json
-from extractor import doc_recognizer
 from constants import SYSTEM_PROMPT, USER_PROMPT
 
 
@@ -26,11 +24,6 @@ def word_parser(extracted_text, context_size):
         }
     )
 
-    print("RAW RESPONSE JSON:")
-    print(response.json())
-
     answer = response.json()["message"]["content"]
-    print("MODEL ANSWER:")
-    print(answer)
     return answer
 
