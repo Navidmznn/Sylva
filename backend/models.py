@@ -13,13 +13,18 @@ class ClassMeeting(BaseModel):
 class Assessment(BaseModel):
     title: Optional[str] = None
     weight_percent: Optional[float] = None
-    deadline: Optional[str] = None
+    date: Optional[str] = None       # single due date, format YYYY-MM-DD
+    dates: Optional[List[str]] = None  
+    start: Optional[str] = None      # for range-based assessments
+    end: Optional[str] = None
+    time: Optional[str] = None       # e.g. "11:59 PM"
     confidence: Optional[float] = None
- 
- 
+
+
 class ScheduleEntry(BaseModel):
-    week: Optional[str] = None
-    date: Optional[str] = None
+    week: Optional[int] = None       # int, not str
+    start: Optional[str] = None      # week start date YYYY-MM-DD
+    end: Optional[str] = None        # week end date YYYY-MM-DD
     topic: Optional[str] = None
  
  

@@ -1,5 +1,7 @@
 import tiktoken
 
+_ENCODING = tiktoken.get_encoding("cl100k_base")
+
 class Block:
 
     def __init__(self, text, is_table):
@@ -9,6 +11,4 @@ class Block:
         self.context_size = 0
     
     def set_context_size(self):
-        encoding = tiktoken.get_encoding("cl100k_base")
-        self.context_size = len(encoding.encode(self.text))
-
+        self.context_size = len(_ENCODING.encode(self.text))

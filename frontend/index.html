@@ -12,8 +12,8 @@
   <title>Dashboard</title>
 </head>
 <body>
-
-
+ 
+ 
   <nav>
     <div class="header">Syllabus Extractor
       <div class="hamburger">
@@ -23,29 +23,44 @@
       </div>
     </div>
     <div class="button-area">
-      <div class="main-text">Please upload your syllabus... or don't not like I care. hmph!</div>
-      <button class="drop-button">
+      <div class="main-text">Please upload your syllabus</div>
+      <button type="button" class="drop-button">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/>
           <polyline points="17 8 12 3 7 8"/>
           <line x1="12" y1="3" x2="12" y2="15"/>
         </svg>
         Upload Syllabus
-        <input type="file" accept=".pdf" style="display:none"/>
       </button>
+      <input type="file" accept=".pdf" style="display:none"/>
     </div>
     
-    <div id="results" style="display:none;">
+    <div id="results">
       <div id="course-card">
         <select name="Course" id="drop-menu"></select>
-        <canvas id="pie-chart"></canvas>
-        <div id="legend"></div>
+        <div id="card-body">
+          <canvas id="pie-chart" width="260" height="260"></canvas>
+          <div id="legend"></div>
+        </div>
       </div>
     </div>
     <div id="calendar-section" style="display:none;">
       <div id="calendar-filters">
-        <label><input type="checkbox" value="assessment" checked> Assessments</label>
-        <label><input type="checkbox" value="week" checked> Schedule</label>
+        <div class="filter-group">
+          <span class="filter-group-label">Type</span>
+          <div class="filter-pills">
+            <button class="filter-pill type-pill active" data-value="assessment">
+              <span class="pill-dot pill-dot--assessment"></span>Assessments
+            </button>
+            <button class="filter-pill type-pill active" data-value="week">
+              <span class="pill-dot pill-dot--week"></span>Schedule
+            </button>
+          </div>
+        </div>
+        <div class="filter-group filter-group--courses" id="course-filter-group" style="display:none;">
+          <span class="filter-group-label">Courses</span>
+          <div class="filter-pills" id="course-filter-pills"></div>
+        </div>
       </div>
       <div id="calendar"></div>
     </div>
@@ -60,14 +75,55 @@
         <div id="modal-description"></div>
       </div>
     </div>
-    <div class="assessment-list" style="display: none;">
+    <div id="grade-calc-section" style="display:none;">
+      <div class="gc-header">
+        <h2 class="gc-title">Grade Calculator</h2>
+        <div class="gc-controls">
+          <select id="gc-course-select" class="gc-select"></select>
+          <select id="gc-scale-select" class="gc-select">
+            <option value="letter-plus">A+ to F (Canadian)</option>
+            <option value="letter-simple">A to F</option>
+            <option value="percent">Percentage</option>
+            <option value="gpa-4">4.0 GPA Scale</option>
+            <option value="gpa-12">12-Point GPA (Waterloo)</option>
+          </select>
+        </div>
+      </div>
+      <div class="gc-body">
+        <div class="gc-panel" id="gc-inputs"></div>
+        <div class="gc-panel" id="gc-results"></div>
+      </div>
     </div>
 
-
+    <div id="assessment-section" style="display:none;">
+      <div class="assessment-section-header">
+        <h2 class="assessment-section-title">Assessments</h2>
+        <label class="toggle-label">
+          <input type="checkbox" id="hide-past-toggle" checked />
+          <span class="toggle-track">
+            <span class="toggle-thumb"></span>
+          </span>
+          <span class="toggle-text">Hide past</span>
+        </label>
+      </div>
+      <div class="assessment-list"></div>
+    </div>
   </nav>
-
+ 
   
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="app.js"></script>
+ 
+  <div id="loading-modal">
+    <div id="loading-box">
+      <div id="loading-icons">
+        <span>📄</span><span>📄</span><span>📄</span>
+      </div>
+      <div id="loading-title">Reading your syllabus...</div>
+      <div id="loading-subtitle">This takes about a minute. Grab a coffee ☕</div>
+      <div id="loading-bar-track">
+        <div id="loading-bar-fill"></div>
+      </div>
+    </div>
+  </div>
 </body>
-</html>

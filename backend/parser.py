@@ -1,29 +1,32 @@
-import requests
-from constants import SYSTEM_PROMPT, USER_PROMPT
+import httpx
+from constants import SYSTEM_PROMPT, USER_PROMPT, OLLAMA_MODEL, OLLAMA_URL
 
 
+async def word_parser(extracted_text: str, context_size: int) -> str:
+    prompt = USER_PROMPT + extracted_text
 
-
-def word_parser(extracted_text, context_size):
-    prompt = USER_PROMPT
-    prompt += extracted_text
-
-    response = requests.post(
-        "http://localhost:11434/api/chat",
-        json={
-            "model": "qwen3:8b",
-            "format": "json",
-            "stream": False,
-            "options": {
-            "num_ctx": context_size
-            },
-            "messages": [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt}
-            ]
-        }
-    )
-
-    answer = response.json()["message"]["content"]
-    return answer
-
+    async with httpx.AsyncClient(timeout=None) as client:
+        response = await client.post(
+            f"{OLLAMA_URL}/api/chat",
+            json={
+                "model": OLLAMA_MODEL,
+                "format": "json",
+                "stream": False,
+                "options": {"num_ctx": context_size},
+                "messages": [
+                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "user", "content": prompt}
+                ]
+            }
+        )
+        response.raise_for_status()
+        raw = response.json()["message"]["content"]
+        # Strip markdown code fences if the model added them
+        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```", 2)[-1]  # remove opening fence
+            raw = raw.rsplit("```", 1)[0]  # remove closing fence
+            raw = raw.strip()
+            if raw.startswith("json"):
+                raw = raw[4:].strip()
+        return raw

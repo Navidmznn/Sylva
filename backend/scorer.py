@@ -1,9 +1,9 @@
 import re
+from block import _ENCODING
 from constants import (COURSE_WORK, ONCE_SCHEDULE_WORDS, REPEATED_SCHEDULE_WORDS, WEIGHT_KEY, PRIMARY_WEIGHT_KEYS, TIME_PATTERN,
-                        DATE_PATTERN,CONTACT_WORDS, INSTRUCTOR_WORDS, MEETING_WORDS, EMAIL_PATTERN, OFFICE_HOURS, LOCATION_WORDS,
+                        DATE_PATTERN, CONTACT_WORDS, INSTRUCTOR_WORDS, MEETING_WORDS, EMAIL_PATTERN, OFFICE_HOURS, LOCATION_WORDS,
                           CONTEXT_SIZES, SYSTEM_PROMPT, USER_PROMPT
         )
-import tiktoken
 
 def set_importance_score(block):
     text = block.text.lower()
@@ -41,13 +41,11 @@ def set_importance_score(block):
         matches = re.findall(pattern, text)
         primary_weight_count += len(matches)
 
-
     for word in WEIGHT_KEY:
         pattern = r"\b" + re.escape(word) + r"\b"
         if re.search(pattern, text):
             has_grading_word = True
             break
-
 
     for phrase in ONCE_SCHEDULE_WORDS:
         pattern = r"\b" + re.escape(phrase) + r"\b"
@@ -64,7 +62,6 @@ def set_importance_score(block):
         pattern = r"\b" + re.escape(word) + r"\b"
         matches = re.findall(pattern, text)
         contact_word_count += len(matches)
-
 
     for word in MEETING_WORDS:
         pattern = r"\b" + re.escape(word) + r"\b"
@@ -84,7 +81,6 @@ def set_importance_score(block):
     email_count = len(re.findall(EMAIL_PATTERN, text))
 
     word_count = len(text.split())
-
 
     score += min(location_count, 3) * 4
     score += percent_count * 3
@@ -121,7 +117,7 @@ def set_importance_score(block):
         score += 3
 
     if word_count > 180 and score < 12:
-        score -= 2
+        score = max(score - 2, 0)
     elif word_count < 60 and score >= 6:
         score += 1
 
@@ -157,12 +153,13 @@ def set_importance_score(block):
 
     if office_hours_count > 0 and email_count > 0:
         score += 3
+
     if location_count > 0 and time_count > 0:
         score += 5
 
     if location_count > 0 and meeting_word_count > 0:
         score += 4
-        
+
     block.importance_score = score
 
 
@@ -175,17 +172,13 @@ def score_and_size_blocks(blocks):
         block.set_context_size()
 
 
-
-
 def prune_blocks_to_context_limit(blocks, context_limit):
     if not blocks:
         return []
-    
 
     total_tokens = sum(block.context_size for block in blocks)
-    encoding = tiktoken.get_encoding("cl100k_base")
-    total_tokens += len(encoding.encode(SYSTEM_PROMPT))
-    total_tokens += len(encoding.encode(USER_PROMPT))
+    total_tokens += len(_ENCODING.encode(SYSTEM_PROMPT))
+    total_tokens += len(_ENCODING.encode(USER_PROMPT))
 
     if total_tokens <= context_limit:
         return blocks[:]
@@ -195,7 +188,7 @@ def prune_blocks_to_context_limit(blocks, context_limit):
 
     blocks_sorted_for_removal = sorted(
         removable_blocks,
-        key=lambda b: b.context_size / ((b.importance_score + 1) ** 1.2),
+        key=lambda b: b.context_size / max((b.importance_score + 1) ** 1.2, 1e-9),
         reverse=True
     )
 
