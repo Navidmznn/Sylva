@@ -3,7 +3,7 @@
 ═══════════════════════════════════════════════════════════════════════════ */
 
 import { courses } from './state.js';
-import { escapeHtml, expandAssessments, getCourseColors } from './utils.js';
+import { escapeHtml, expandAssessments, getCourseColors, addDays } from './utils.js';
 
 const calendarSectionEl = document.getElementById('calendar-section');
 const calendarHostEl    = document.getElementById('calendar');
@@ -32,27 +32,44 @@ function applyFilters() {
 function buildCourseEvents(course, courseIdx) {
   const colors   = getCourseColors(courseIdx);
   const expanded = expandAssessments(course.assessments || []);
+
+  // Format a weight value for the description, falling back to "?" rather
+  // than letting "Worth null%" leak into the modal.
+  const weightStr = w => (w == null ? '?' : w);
+
   return [
     ...expanded
       .filter(a => a.date || a.start)
-      .map(a => ({
-        title: a.title,
-        ...(a.date ? { date: a.date } : { start: a.start, end: a.end }),
-        backgroundColor: colors.assessment,
-        borderColor: colors.assessment,
-        extendedProps: {
-          type: 'assessment',
-          description: a._parentTitle
-            ? `${a._parentTitle} (${a._expandedIndex}/${a._expandedTotal}) — Worth ${a._expandedWeight}% each`
-            : `Worth ${a.weight_percent}%`,
-          time: a.time || null,
-          courseIndex: courseIdx,
-        },
-      })),
+      .map(a => {
+        // FullCalendar treats `end` as exclusive on all-day events: an event
+        // that should visually cover Mon–Fri must be passed end=Saturday.
+        // Single-date events use the `date` shorthand so this only matters
+        // for ranges (a.start + a.end).
+        const dateProps = a.date
+          ? { date: a.date }
+          : { start: a.start, end: a.end ? addDays(a.end, 1) : undefined };
+
+        return {
+          title: a.title,
+          ...dateProps,
+          backgroundColor: colors.assessment,
+          borderColor: colors.assessment,
+          extendedProps: {
+            type: 'assessment',
+            description: a._parentTitle
+              ? `${a._parentTitle} (${a._expandedIndex}/${a._expandedTotal}) — Worth ${weightStr(a._expandedWeight)}% each`
+              : `Worth ${weightStr(a.weight_percent)}%`,
+            time: a.time || null,
+            courseIndex: courseIdx,
+          },
+        };
+      }),
     ...(course.schedule || []).map(s => ({
       title: `Week ${s.week}: ${s.topic}`,
       start: s.start,
-      end: s.end,
+      // Schedule entries are inclusive ranges in the syllabus data; FullCalendar
+      // expects exclusive ends, so push out by one day.
+      end: s.end ? addDays(s.end, 1) : undefined,
       backgroundColor: colors.week,
       borderColor: colors.week,
       extendedProps: { type: 'week', description: s.topic, courseIndex: courseIdx },

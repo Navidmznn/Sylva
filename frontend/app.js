@@ -7,7 +7,7 @@
    utils.js.
 ═══════════════════════════════════════════════════════════════════════════ */
 
-import { addCourses, courses } from './state.js';
+import { addCourses, courses, removeCourse } from './state.js';
 import { renderCourseInfo, updateInfoDropdown } from './info.js';
 import { renderChart, updateDropdown, getCurrentChartIndex } from './chart.js';
 import { renderAssessmentList } from './assessments.js';
@@ -19,6 +19,7 @@ import {
   showCalendarSection,
 } from './calendar.js';
 import { renderGradeCalc } from './gradeCalc.js';
+import { showToast, showConfirm } from './utils.js';
 
 const uploadBtn    = document.querySelector('.upload-btn');
 const fileInput    = document.querySelector('.file-input');
@@ -84,19 +85,63 @@ function renderAllSections() {
 }
 
 // ── Restore saved data on page load ─────────────────────────────────────────
-function initFromStorage() {
+async function initFromStorage() {
   const saved = loadPersistedCourses();
   if (saved.length === 0) return;
 
-  addCourses(saved);
+  // No onDuplicate — fresh-load arrays can't contain dupes against an empty
+  // courses[]. Async only because addCourses returns a promise.
+  await addCourses(saved);
   renderAllSections();
   clearDataBtn.style.display = 'inline-flex';
   console.log(`[Syllabus App] Restored ${saved.length} course(s) from localStorage.`);
 }
 
+// ── Per-course delete ────────────────────────────────────────────────────────
+// Deletes whichever course is currently displayed in the chart card.
+const deleteCourseBtn = document.getElementById('delete-course-btn');
+deleteCourseBtn.addEventListener('click', async () => {
+  const idx = getCurrentChartIndex();
+  if (idx < 0 || idx >= courses.length) return;
+
+  const target = courses[idx];
+  const label  = [target.course_code, target.section_code, target.term]
+    .filter(Boolean).join(' · ') || target.course_title || 'this course';
+
+  const ok = await showConfirm({
+    title: 'Delete this course?',
+    message: `${label} and all of its extracted assessments and schedule entries will be removed.`,
+    confirmLabel: 'Delete',
+    cancelLabel: 'Keep',
+    danger: true,
+  });
+  if (!ok) return;
+
+  removeCourse(idx);
+
+  // If that was the last course, the app reverts to its empty state — easiest
+  // path is the same teardown as Clear-all so all sections collapse cleanly.
+  if (courses.length === 0) {
+    clearPersistedCourses();
+    window.location.reload();
+    return;
+  }
+
+  persistCourses();
+  renderAllSections();
+  showToast(`Deleted ${label}.`, 'success');
+});
+
 // ── Clear saved data ─────────────────────────────────────────────────────────
 clearDataBtn.addEventListener('click', async () => {
-  if (!confirm('Clear all saved syllabi? This cannot be undone.')) return;
+  const ok = await showConfirm({
+    title: 'Clear all saved syllabi?',
+    message: 'Every uploaded course and its extracted data will be removed. This cannot be undone.',
+    confirmLabel: 'Clear all',
+    cancelLabel: 'Keep them',
+    danger: true,
+  });
+  if (!ok) return;
 
   clearPersistedCourses();
 
@@ -114,7 +159,7 @@ fileInput.addEventListener('change', async () => {
   if (!file) return;
 
   if (file.size > 20 * 1024 * 1024) {
-    alert('File too large. Please upload a PDF under 20MB.');
+    showToast('File too large. PDFs must be under 20MB.', 'warning');
     fileInput.value = '';
     return;
   }
@@ -153,12 +198,34 @@ fileInput.addEventListener('change', async () => {
 
     const newCourses = result.data.courses;
     if (!newCourses || newCourses.length === 0) {
-      alert('No course data extracted. Please try a different syllabus format.');
+      showToast('No course data could be extracted from this PDF. Try a different syllabus.', 'warning');
       return;
     }
 
-    addCourses(newCourses);
-    persistCourses();   // write the updated courses array to localStorage
+    // Dedup hook: when an incoming course matches an existing one on
+    // (course_code, section_code, term), prompt the user to replace or skip.
+    const beforeCount = courses.length;
+    await addCourses(newCourses, {
+      onDuplicate: async (incoming) => {
+        const label = [incoming.course_code, incoming.section_code, incoming.term]
+          .filter(Boolean).join(' · ');
+        const replace = await showConfirm({
+          title: 'Course already saved',
+          message: `${label || 'This course'} is already in your list. Replace the existing entry with this upload?`,
+          confirmLabel: 'Replace',
+          cancelLabel: 'Skip',
+        });
+        return replace ? 'replace' : 'skip';
+      },
+    });
+
+    if (courses.length === beforeCount) {
+      // Every incoming course was a duplicate the user chose to skip.
+      showToast('Nothing added — duplicates skipped.', 'info');
+      return;
+    }
+
+    persistCourses();
     renderAllSections();
     clearDataBtn.style.display = 'inline-flex';
 
@@ -168,7 +235,7 @@ fileInput.addEventListener('change', async () => {
 
   } catch (err) {
     console.error('[ERROR]', err);
-    alert('Error: ' + err.message);
+    showToast(err.message || 'Something went wrong.', 'error');
   } finally {
     loadingModal.classList.remove('show');
     uploadBtn.innerHTML = originalHTML;
@@ -184,10 +251,12 @@ fileInput.addEventListener('change', async () => {
 // chart/info course-select dropdowns to the last index.
 window.addEventListener('syllabusapp:assessmentupdated', () => {
   persistCourses();
-  renderAssessmentList();              // rebuild flat list from updated courses
-  renderChart(getCurrentChartIndex()); // weights may have changed; redraw what the user is viewing
-  refreshCalendarEvents();             // titles/dates may have changed
-  renderGradeCalc();                   // weight changes affect grade targets
+  renderAssessmentList();
+  // Clamp in case a course was removed since the chart last rendered.
+  const idx = Math.min(getCurrentChartIndex(), courses.length - 1);
+  if (idx >= 0) renderChart(idx);
+  refreshCalendarEvents();
+  renderGradeCalc();
 });
 
 // ── Top-nav active-link tracking ────────────────────────────────────────────
@@ -199,21 +268,10 @@ document.querySelectorAll('.nav-link').forEach(link => {
 });
 
 // ── Hamburger menu (mobile) ─────────────────────────────────────────────────
-document.querySelector('.hamburger').addEventListener('click', function () {
-  const nav = document.querySelector('.nav-links');
-  if (nav.style.display === 'flex') {
-    nav.style.display = 'none';
-  } else {
-    nav.style.display = 'flex';
-    nav.style.flexDirection = 'column';
-    nav.style.position = 'absolute';
-    nav.style.top = '72px';
-    nav.style.right = '16px';
-    nav.style.background = '#fff';
-    nav.style.padding = '16px';
-    nav.style.borderRadius = '16px';
-    nav.style.boxShadow = '0 8px 30px rgba(0,0,0,0.15)';
-  }
+// Toggles a single class — all visual styling lives in style.css under
+// `.nav-links--mobile-open` (dark surface, violet-dusk hover/active accents).
+document.querySelector('.hamburger').addEventListener('click', () => {
+  document.querySelector('.nav-links').classList.toggle('nav-links--mobile-open');
 });
 
 // ── Init ─────────────────────────────────────────────────────────────────────

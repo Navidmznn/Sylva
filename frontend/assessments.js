@@ -4,7 +4,7 @@
 ═══════════════════════════════════════════════════════════════════════════ */
 
 import { courses } from './state.js';
-import { escapeHtml, expandAssessments, getCourseColors } from './utils.js';
+import { escapeHtml, expandAssessments, getCourseColors, showToast } from './utils.js';
 
 const sectionEl = document.getElementById('assessment-section');
 const listEl    = document.querySelector('.assessment-list');
@@ -37,17 +37,18 @@ function formatDisplayDate(a) {
 // Annotates every expanded item with _courseIdx, _courseLabel, and _originalIdx
 // so that commitEdit() can write back to courses[courseIdx].assessments[originalIdx].
 //
-// Non-expanded items are pushed as their original object reference by
-// expandAssessments(), so indexOf() finds them reliably.
-// Expanded multi-date items carry _parentTitle which identifies the parent.
+// Lookup is by stable `id` (assigned in state.js at addCourses time), so
+// renaming an assessment does not strand the flat-list row from its parent.
+// expandAssessments propagates `id` via object spread, so expanded children
+// share their parent's id; _expandedIndex distinguishes siblings.
 
 function buildFlatAssessments() {
   return courses.flatMap((course, courseIdx) => {
     const originals = course.assessments || [];
     return expandAssessments(originals).map(a => {
-      const originalIdx = a._parentTitle !== undefined
-        ? originals.findIndex(o => o.title === a._parentTitle)
-        : originals.indexOf(a);
+      // expandAssessments propagates `id` via spread for expanded copies, so
+      // every entry — expanded or not — points back to its parent by `id`.
+      const originalIdx = originals.findIndex(o => o.id === a.id);
       return {
         ...a,
         _courseLabel: course.course_code || course.course_title || `Course ${courseIdx + 1}`,
@@ -138,6 +139,10 @@ function renderNormalRow(a, i, today, hidePast) {
 
   const weight = a.weight_percent != null ? `${a.weight_percent}%` : '';
   const colors = getCourseColors(a._courseIdx);
+  // Calendar export only makes sense when buildEventDates() can resolve a
+  // start date. Without one, the .ics export would have shipped 19700101 —
+  // disable the buttons instead.
+  const noDate = !buildEventDates(a).start;
 
   return `
     <div class="assessment-row ${past ? 'is-past' : ''}" data-index="${i}">
@@ -157,9 +162,9 @@ function renderNormalRow(a, i, today, hidePast) {
         <button class="edit-btn" data-index="${i}" aria-label="Edit assessment">
           ${ICON_PENCIL}<span>Edit</span>
         </button>
-        ${calBtn('google', a)}
-        ${calBtn('outlook', a)}
-        ${calBtn('apple', a)}
+        ${calBtn('google',  a, noDate)}
+        ${calBtn('outlook', a, noDate)}
+        ${calBtn('apple',   a, noDate)}
       </div>
     </div>
   `;
@@ -308,14 +313,18 @@ export function renderAssessmentList() {
 
 // ── Calendar helpers (unchanged) ──────────────────────────────────────────────
 
-function calBtn(provider, assessment) {
+function calBtn(provider, assessment, disabled = false) {
   const icons = {
     google:  `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M21.35 11.1h-9.17v2.73h6.51c-.33 3.81-3.5 5.44-6.5 5.44C8.36 19.27 5 16.25 5 12c0-4.1 3.2-7.27 7.2-7.27 3.09 0 4.9 1.97 4.9 1.97L19 4.72S16.56 2 12.1 2C6.42 2 2.03 6.8 2.03 12c0 5.05 4.13 10 10.22 10 5.33 0 9.98-3.64 9.98-9.58 0-.56-.04-1.23-.18-1.32z"/></svg>`,
     outlook: `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M7 6h10a2 2 0 012 2v8a2 2 0 01-2 2H7a2 2 0 01-2-2V8a2 2 0 012-2zm0 2v1.5l5 3 5-3V8H7zm0 3.5V16h10v-4.5l-5 3-5-3z"/></svg>`,
     apple:   `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>`,
   };
   const labels = { google: 'Google', outlook: 'Outlook', apple: 'Apple' };
-  return `<button class="cal-btn" data-provider="${provider}">${icons[provider]}<span>${labels[provider]}</span></button>`;
+  const cls    = `cal-btn${disabled ? ' is-disabled' : ''}`;
+  const attrs  = disabled
+    ? 'disabled aria-disabled="true" title="No date set — add one in Edit"'
+    : '';
+  return `<button class="${cls}" data-provider="${provider}" ${attrs}>${icons[provider]}<span>${labels[provider]}</span></button>`;
 }
 
 function buildEventDates(assessment) {
@@ -333,22 +342,28 @@ function toISOBasic(dateStr) {
 
 function addToCalendar(provider, assessment) {
   const { start, end } = buildEventDates(assessment);
+  // Defensive: the export buttons are rendered disabled when no date exists,
+  // but any direct caller must still be guarded.
+  if (!start) {
+    showToast('No date set for this assessment.', 'warning');
+    return;
+  }
   const title   = encodeURIComponent(assessment.title || 'Assessment');
-  const details = encodeURIComponent(`Worth ${assessment.weight_percent || '?'}%`);
+  const details = encodeURIComponent(`Worth ${assessment.weight_percent ?? '?'}%`);
   const startB  = toISOBasic(start);
 
   let url = null;
 
   if (provider === 'outlook') {
-    url = `https://outlook.live.com/calendar/0/deeplink/compose?subject=${title}&body=${details}&startdt=${start || ''}&enddt=${end || ''}&allday=true&path=%2Fcalendar%2Faction%2Fcompose`;
+    url = `https://outlook.live.com/calendar/0/deeplink/compose?subject=${title}&body=${details}&startdt=${start}&enddt=${end || start}&allday=true&path=%2Fcalendar%2Faction%2Fcompose`;
   } else if (provider === 'apple') {
     const ics = [
       'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//syllabus.ai//EN',
       'BEGIN:VEVENT',
       `SUMMARY:${assessment.title || 'Assessment'}`,
-      `DESCRIPTION:Worth ${assessment.weight_percent || '?'}%`,
-      `DTSTART;VALUE=DATE:${startB || '19700101'}`,
-      `DTEND;VALUE=DATE:${startB || '19700101'}`,
+      `DESCRIPTION:Worth ${assessment.weight_percent ?? '?'}%`,
+      `DTSTART;VALUE=DATE:${startB}`,
+      `DTEND;VALUE=DATE:${toISOBasic(end) || startB}`,
       'END:VEVENT', 'END:VCALENDAR',
     ].join('\r\n');
     const blob = new Blob([ics], { type: 'text/calendar' });
@@ -365,6 +380,10 @@ function addToCalendar(provider, assessment) {
 
 function addToGoogleCalendar(assessment) {
   const { start, end, allDay } = buildEventDates(assessment);
+  if (!start) {
+    showToast('No date set for this assessment.', 'warning');
+    return;
+  }
 
   google.accounts.oauth2.initTokenClient({
     client_id: CLIENT_ID,
@@ -372,9 +391,9 @@ function addToGoogleCalendar(assessment) {
     callback: (tokenResponse) => {
       const event = {
         summary: assessment.title,
-        description: `Worth ${assessment.weight_percent}%`,
+        description: `Worth ${assessment.weight_percent ?? '?'}%`,
         ...(allDay
-          ? { start: { date: start || '' }, end: { date: end || start || '' } }
+          ? { start: { date: start }, end: { date: end || start } }
           : { start: { dateTime: start }, end: { dateTime: end } }
         ),
       };
@@ -387,10 +406,17 @@ function addToGoogleCalendar(assessment) {
         },
         body: JSON.stringify(event),
       })
-        .then(res => res.json())
+        .then(res => {
+          if (!res.ok) throw new Error(`Google API ${res.status}`);
+          return res.json();
+        })
         .then(data => {
           console.log('Event created:', data);
-          alert(`"${assessment.title}" added to your Google Calendar!`);
+          showToast(`"${assessment.title}" added to Google Calendar.`, 'success');
+        })
+        .catch(err => {
+          console.error('[Google Calendar] export failed:', err);
+          showToast('Could not add to Google Calendar.', 'error');
         });
     },
   }).requestAccessToken();

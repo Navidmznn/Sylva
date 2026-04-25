@@ -16,18 +16,17 @@ let scaleKey    = 'letter-plus';
 let _mounted    = false;
 
 // Persistent score inputs across re-renders, keyed by stable assessment id.
-// Stable id format: `${courseIndex}::${originalIdx}::${expandedIdx}` where
-//   originalIdx  – position in `course.assessments` (survives title/weight edits)
-//   expandedIdx  – 0 for non-expanded items, 1..N for multi-date occurrences
+// Stable id format: `${assessment.id}::${expandedIdx}` where:
+//   assessment.id  – assigned in state.js at addCourses time (id-stable across
+//                    title/weight edits AND across course-list reorderings or
+//                    deletions, since it's not positional)
+//   expandedIdx    – 0 for non-expanded items, 1..N for multi-date occurrences
 // Values are { score, outOf } as the raw input strings (so a half-typed
 // "9" doesn't get re-formatted to "9" mid-keystroke).
 const scoreInputs = new Map();
 
-function makeAssessmentId(courseIdx, originals, a) {
-  const originalIdx = a._parentTitle !== undefined
-    ? originals.findIndex(o => o.title === a._parentTitle)
-    : originals.indexOf(a);
-  return `${courseIdx}::${originalIdx}::${a._expandedIndex ?? 0}`;
+function makeAssessmentId(a) {
+  return `${a.id}::${a._expandedIndex ?? 0}`;
 }
 
 const GRADE_SCALES = {
@@ -168,7 +167,7 @@ function renderGcBody() {
   // and its own (proportionally divided) weight.
   const originals   = course.assessments || [];
   const assessments = expandAssessments(originals);
-  const ids         = assessments.map(a => makeAssessmentId(courseIndex, originals, a));
+  const ids         = assessments.map(a => makeAssessmentId(a));
 
   inputsEl.innerHTML = `
     <div class="gc-panel-title">Your Scores</div>
