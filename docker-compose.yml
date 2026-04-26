@@ -1,0 +1,41 @@
+# Local-dev stack for syllabus.ai infra dependencies.
+#
+# Only Postgres and Redis run in containers. The FastAPI app and the arq
+# worker stay on the host because they need access to local Ollama (and
+# optionally CUDA for Docling).
+#
+# Up:    docker compose up -d
+# Down:  docker compose down
+# Wipe:  docker compose down -v   (drops the data volume)
+
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER:     syllabus
+      POSTGRES_PASSWORD: syllabus
+      POSTGRES_DB:       syllabus
+    ports:
+      - "5432:5432"
+    volumes:
+      - syllabus_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test:     ["CMD-SHELL", "pg_isready -U syllabus -d syllabus"]
+      interval: 5s
+      timeout:  3s
+      retries:  10
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test:     ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout:  3s
+      retries:  10
+
+volumes:
+  syllabus_pgdata:

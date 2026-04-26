@@ -2106,45 +2106,21 @@ body {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   VIOLET-DUSK DARK COMPONENTS
-   ──────────────────────────────────────────────────────────────────────────
-   Tokens + components for the new toast / confirm dialog / mobile nav drawer.
-   Intentionally distinct from the cream pastel theme that runs the rest of
-   the app — these are notification/overlay surfaces that need to read as
-   "system UI" and use the spec'd Violet Dusk accent (#8b7cf6).
+   NEW COMPONENTS — toast, confirm dialog, mobile nav drawer, delete button,
+   disabled calendar buttons, JS-driven progress bar.
+   All tokens reference the existing cream/pastel design system.
 ═══════════════════════════════════════════════════════════════════════════ */
-
-:root {
-  --violet-dusk:        #8b7cf6;
-  --violet-dusk-soft:   #a89bf8;
-  --violet-dusk-dim:    rgba(139, 124, 246, 0.20);
-
-  --surface-900:        #1a1a24;
-  --surface-800:        #232333;
-  --surface-700:        #2c2c3e;
-  --surface-border:     rgba(255, 255, 255, 0.08);
-  --surface-border-hi:  rgba(139, 124, 246, 0.35);
-
-  --on-dark:            #f0eef5;
-  --on-dark-muted:      #a8a4b8;
-
-  --danger:             #ef5350;
-  --danger-soft:        rgba(239, 83, 80, 0.16);
-
-  --success:            #66bb6a;
-  --warning:            #ffa726;
-}
 
 /* ── Toast ────────────────────────────────────────────────────────────────── */
 .toast-host {
   position: fixed;
-  top: 88px;                  /* clear the sticky header */
+  top: 88px;
   right: 24px;
   z-index: 1000;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  pointer-events: none;       /* host doesn't catch clicks; toasts opt in */
+  pointer-events: none;
   max-width: calc(100vw - 48px);
 }
 
@@ -2156,12 +2132,12 @@ body {
   min-width: 280px;
   max-width: 420px;
   padding: 14px 16px;
-  background: var(--surface-800);
-  border: 1px solid var(--surface-border);
-  border-left: 3px solid var(--violet-dusk);
+  background: var(--white);
+  border: 1.5px solid var(--cream-dark);
+  border-left: 4px solid var(--sage);
   border-radius: var(--radius-md);
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
-  color: var(--on-dark);
+  box-shadow: 0 8px 32px var(--shadow-medium);
+  color: var(--text-primary);
   font-family: var(--font-main);
   font-size: 14px;
   line-height: 1.4;
@@ -2178,13 +2154,10 @@ body {
   display: flex;
   align-items: center;
   justify-content: center;
-  width: 22px;
-  height: 22px;
-  border-radius: 50%;
-  color: var(--violet-dusk);
+  color: var(--sage-dark);
 }
 
-.toast-msg   { flex: 1; word-break: break-word; }
+.toast-msg { flex: 1; word-break: break-word; color: var(--text-secondary); }
 
 .toast-close {
   flex-shrink: 0;
@@ -2197,23 +2170,29 @@ body {
   padding: 0;
   background: transparent;
   border: none;
-  color: var(--on-dark-muted);
-  border-radius: 4px;
+  color: var(--text-muted);
+  border-radius: var(--radius-sm);
   cursor: pointer;
   transition: color 0.15s ease, background 0.15s ease;
 }
 
 .toast-close:hover {
-  color: var(--on-dark);
-  background: rgba(255, 255, 255, 0.06);
+  color: var(--text-primary);
+  background: var(--cream);
 }
 
-.toast--success { border-left-color: var(--success); }
-.toast--success .toast-icon { color: var(--success); }
-.toast--warning { border-left-color: var(--warning); }
-.toast--warning .toast-icon { color: var(--warning); }
-.toast--error   { border-left-color: var(--danger); }
-.toast--error   .toast-icon { color: var(--danger); }
+/* Kind variants — left border + icon color only */
+.toast--success { border-left-color: var(--sage-dark); }
+.toast--success .toast-icon { color: var(--sage-dark); }
+
+.toast--warning { border-left-color: var(--peach-dark); }
+.toast--warning .toast-icon { color: var(--peach-dark); }
+
+.toast--error   { border-left-color: var(--coral-dark); }
+.toast--error   .toast-icon { color: var(--coral-dark); }
+
+.toast--info    { border-left-color: var(--lavender-dark); }
+.toast--info    .toast-icon { color: var(--lavender-dark); }
 
 @media (max-width: 600px) {
   .toast-host {
@@ -2235,7 +2214,7 @@ body {
   align-items: center;
   justify-content: center;
   padding: 24px;
-  background: rgba(10, 10, 18, 0.55);
+  background: rgba(0, 0, 0, 0.35);
   backdrop-filter: blur(4px);
   -webkit-backdrop-filter: blur(4px);
   opacity: 0;
@@ -2248,31 +2227,31 @@ body {
 .confirm-box {
   width: 100%;
   max-width: 420px;
-  padding: 28px 28px 22px;
-  background: var(--surface-800);
-  border: 1px solid var(--surface-border);
-  border-radius: var(--radius-lg);
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
-  color: var(--on-dark);
+  padding: 32px 32px 26px;
+  background: var(--white);
+  border-radius: var(--radius-xl);
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.18);
   font-family: var(--font-main);
-  transform: translateY(8px);
+  transform: translateY(10px);
   transition: transform 0.22s ease;
+  animation: modalIn 0.25s ease-out forwards;
 }
 
 .confirm-overlay--enter .confirm-box { transform: translateY(0); }
 
 .confirm-title {
-  font-size: 18px;
-  font-weight: 700;
-  margin-bottom: 8px;
-  color: var(--on-dark);
+  font-family: var(--font-handwritten);
+  font-size: 26px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 10px;
 }
 
 .confirm-message {
   font-size: 14px;
-  line-height: 1.5;
-  color: var(--on-dark-muted);
-  margin-bottom: 22px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+  margin-bottom: 26px;
 }
 
 .confirm-actions {
@@ -2281,87 +2260,97 @@ body {
   gap: 10px;
 }
 
+/* Shared button base — mirrors .edit-save-btn / .edit-cancel-btn */
 .confirm-btn {
-  padding: 9px 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 22px;
   border-radius: var(--radius-lg);
   font-family: var(--font-main);
   font-size: 13px;
   font-weight: 600;
-  border: 1px solid transparent;
+  border: 2px solid transparent;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+  transition: all 0.2s ease;
 }
 
 .confirm-btn:active { transform: translateY(1px); }
 
 .confirm-btn--cancel {
   background: transparent;
-  border-color: var(--surface-border);
-  color: var(--on-dark-muted);
+  border-color: var(--cream-dark);
+  color: var(--text-secondary);
 }
 .confirm-btn--cancel:hover {
-  border-color: rgba(255, 255, 255, 0.22);
-  color: var(--on-dark);
+  border-color: var(--coral);
+  color: var(--coral-dark);
+  background: rgba(242, 166, 166, 0.08);
 }
 
+/* Default confirm = sage (non-destructive actions like "Replace") */
 .confirm-btn--confirm {
-  background: var(--violet-dusk);
-  border-color: var(--violet-dusk);
-  color: #ffffff;
+  background: var(--sage);
+  border-color: var(--sage);
+  color: var(--white);
+  box-shadow: 0 4px 14px rgba(111, 154, 122, 0.35);
 }
 .confirm-btn--confirm:hover {
-  background: var(--violet-dusk-soft);
-  border-color: var(--violet-dusk-soft);
+  background: var(--sage-dark);
+  border-color: var(--sage-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(111, 154, 122, 0.45);
 }
 
-.confirm-btn--danger {
-  background: var(--danger);
-  border-color: var(--danger);
+/* Destructive confirm = coral (delete, clear-all) */
+.confirm-btn--confirm.confirm-btn--danger {
+  background: var(--coral-dark);
+  border-color: var(--coral-dark);
+  box-shadow: 0 4px 14px rgba(224, 122, 122, 0.35);
 }
-.confirm-btn--danger:hover {
-  background: #f06865;
-  border-color: #f06865;
+.confirm-btn--confirm.confirm-btn--danger:hover {
+  background: #d46060;
+  border-color: #d46060;
+  box-shadow: 0 6px 18px rgba(224, 122, 122, 0.45);
 }
 
-/* ── Mobile nav drawer (replaces inline-style hamburger styling) ─────────── */
+/* ── Mobile nav drawer ────────────────────────────────────────────────────── */
+/* Replaces the inline-style hamburger that set background:#fff via JS.
+   Matches the existing nav card style exactly. */
 .nav-links--mobile-open {
   display: flex !important;
   flex-direction: column;
   align-items: stretch;
-  gap: 4px;
+  gap: 2px;
   position: absolute;
   top: 64px;
   right: 16px;
   min-width: 200px;
-  padding: 12px;
-  background: var(--surface-800);
-  border: 1px solid var(--surface-border);
+  padding: 10px;
+  background: var(--white);
+  border: 1.5px solid var(--cream-dark);
   border-radius: var(--radius-md);
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.45);
+  box-shadow: 0 8px 30px var(--shadow-medium);
   z-index: 200;
 }
 
 .nav-links--mobile-open .nav-link {
-  color: var(--on-dark-muted);
   border-radius: var(--radius-sm);
   padding: 10px 14px;
   transition: background 0.15s ease, color 0.15s ease;
 }
 
 .nav-links--mobile-open .nav-link:hover {
-  background: var(--violet-dusk-dim);
-  color: var(--on-dark);
+  background: var(--cream);
 }
 
 .nav-links--mobile-open .nav-link.active {
-  background: var(--violet-dusk);
-  color: #ffffff;
+  background: var(--cream-dark);
+  color: var(--text-primary);
 }
 
-/* ── Per-course delete button (lives on cream-themed card) ────────────────
-   Stays unobtrusive in its default state to fit the existing pastel UI;
-   gains a danger affordance only on hover/focus.
-─────────────────────────────────────────────────────────────────────────── */
+/* ── Course delete button (in chart card header) ──────────────────────────── */
+/* Sits next to the course <select>. Quiet until hovered — destructive action. */
 .results-header-controls {
   display: flex;
   align-items: center;
@@ -2375,33 +2364,38 @@ body {
   gap: 6px;
   padding: 8px 14px;
   background: transparent;
-  border: 2px solid var(--cream-dark);
+  border: 1.5px solid var(--cream-dark);
   border-radius: var(--radius-lg);
-  color: var(--text-secondary);
+  color: var(--text-muted);
   font-family: var(--font-main);
-  font-size: 13px;
+  font-size: 12px;
   font-weight: 500;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .course-delete-btn:hover,
 .course-delete-btn:focus-visible {
-  background: rgba(242, 166, 166, 0.10);
-  border-color: var(--coral);
+  border-color: var(--coral-dark);
   color: var(--coral-dark);
+  background: rgba(224, 122, 122, 0.06);
   outline: none;
 }
 
-/* ── Disabled calendar export buttons ─────────────────────────────────────
-   When an assessment has no usable date, all three (Google/Outlook/Apple)
-   are rendered with `disabled` so clicks don't fire; this rule is the
-   visual half — desaturated, no hover lift, "not-allowed" cursor.
-─────────────────────────────────────────────────────────────────────────── */
+/* ── Disabled calendar export buttons ─────────────────────────────────────── */
 .cal-btn[disabled],
 .cal-btn.is-disabled {
-  opacity: 0.4;
+  opacity: 0.38;
   cursor: not-allowed;
-  filter: grayscale(0.6);
+  filter: grayscale(0.5);
   pointer-events: none;
+}
+
+/* ── JS-driven loading bar ────────────────────────────────────────────────── */
+/* When app.js polls /jobs/<id> it adds .is-driven, disabling the infinite
+   keyframe animation so width can be set directly from real progress. */
+.loading-bar-fill.is-driven {
+  animation: none;
+  width: 0%;
+  transition: width 0.4s ease-out;
 }
