@@ -2399,3 +2399,152 @@ body {
   width: 0%;
   transition: width 0.4s ease-out;
 }
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   AUTH WIDGET
+   Small login/logout UI in the header. Matches the existing cream/sage/coral
+   palette — no new color tokens.
+═══════════════════════════════════════════════════════════════════════════ */
+.auth-widget {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+/* Logged-out form */
+.auth-login-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* The HTML `hidden` attribute must beat the `display: flex` rules below.
+   Without this, both the login form and the logged-in pill render at once
+   on first paint (until refreshAuth() resolves and toggles them). */
+.auth-widget [hidden] { display: none !important; }
+
+.auth-email-input {
+  width: 200px;
+  padding: 8px 12px;
+  background: var(--cream);
+  border: 1.5px solid var(--cream-dark);
+  border-radius: var(--radius-lg);
+  color: var(--text-primary);
+  font-family: var(--font-main);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.auth-email-input::placeholder { color: var(--text-muted); }
+
+.auth-email-input:focus {
+  border-color: var(--sage);
+  background: var(--white);
+}
+
+.auth-send-btn {
+  padding: 8px 16px;
+  background: var(--sage);
+  border: 1.5px solid var(--sage);
+  border-radius: var(--radius-lg);
+  color: var(--white);
+  font-family: var(--font-main);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.auth-send-btn:hover:not(:disabled) {
+  background: var(--sage-dark);
+  border-color: var(--sage-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(111, 154, 122, 0.35);
+}
+
+.auth-send-btn:disabled {
+  opacity: 0.6;
+  cursor: progress;
+  transform: none;
+}
+
+/* Logged-in pill + actions */
+.auth-user {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.auth-email-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: var(--cream);
+  border: 1.5px solid var(--cream-dark);
+  border-radius: var(--radius-lg);
+  color: var(--text-secondary);
+  font-family: var(--font-main);
+  font-size: 12px;
+  font-weight: 500;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.auth-menu-btn {
+  padding: 6px 12px;
+  background: transparent;
+  border: 1.5px solid var(--cream-dark);
+  border-radius: var(--radius-lg);
+  color: var(--text-muted);
+  font-family: var(--font-main);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.auth-menu-btn:hover {
+  border-color: var(--text-secondary);
+  color: var(--text-primary);
+}
+
+.auth-menu-btn.auth-danger:hover {
+  border-color: var(--coral-dark);
+  color: var(--coral-dark);
+  background: rgba(224, 122, 122, 0.06);
+}
+
+/* Mobile — collapse to icon-only on narrow screens */
+@media (max-width: 900px) {
+  .auth-email-input { width: 140px; }
+  .auth-email-pill  { max-width: 120px; font-size: 11px; }
+}
+
+@media (max-width: 700px) {
+  .auth-widget { display: none; }
+  /* When the hamburger drawer is open, surface auth at the top of it. */
+  .nav-links--mobile-open ~ .auth-widget { display: flex; }
+}
+
+/* Footer privacy link */
+.footer-links {
+  margin-top: 8px;
+  font-size: 13px;
+}
+.footer-links a {
+  color: var(--text-muted);
+  text-decoration: none;
+  border-bottom: 1px dotted var(--text-muted);
+  transition: color 0.15s ease, border-color 0.15s ease;
+}
+.footer-links a:hover {
+  color: var(--sage-dark);
+  border-bottom-color: var(--sage-dark);
+}

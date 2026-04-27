@@ -45,6 +45,31 @@
         <a href="#calendar-section" class="nav-link">Calendar</a>
         <a href="#grade-calc-section" class="nav-link">Grades</a>
       </nav>
+
+      <!-- Auth widget — populated by app.js::renderAuth.
+           Both panels start hidden; refreshAuth() reveals exactly one
+           after GET /auth/me resolves. -->
+      <div id="auth-widget" class="auth-widget" data-state="loading">
+        <!-- Logged-out form -->
+        <form id="auth-login-form" class="auth-login-form" hidden>
+          <input
+            type="email"
+            id="auth-email"
+            class="auth-email-input"
+            placeholder="you@school.edu"
+            autocomplete="email"
+            required
+          />
+          <button type="submit" class="auth-send-btn">Send link</button>
+        </form>
+        <!-- Logged-in pill -->
+        <div id="auth-user" class="auth-user" hidden>
+          <span class="auth-email-pill" id="auth-email-pill"></span>
+          <button type="button" class="auth-menu-btn" id="auth-logout-btn" title="Log out">Log out</button>
+          <button type="button" class="auth-menu-btn auth-danger" id="auth-delete-btn" title="Delete account">Delete account</button>
+        </div>
+      </div>
+
       <button class="hamburger" aria-label="Menu">
         <span></span>
         <span></span>
@@ -276,6 +301,9 @@
   <!-- Footer -->
   <footer class="footer">
     <p>Made with care for students everywhere</p>
+    <p class="footer-links">
+      <a href="http://localhost:8000/privacy" target="_blank" rel="noopener">Privacy</a>
+    </p>
   </footer>
 
   <script type="module" src="app.js"></script>

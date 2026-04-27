@@ -1,36 +1,24 @@
 """
-api.py — FastAPI entry point.
+api.py — FastAPI entry point (with magic-link auth).
 
-Architecture (v2 — job-queue model)
-───────────────────────────────────
-POST /upload    : validates the PDF (mime, size, magic bytes, pikepdf
-                  structure, per-IP slot), writes the bytes to a temp path
-                  the worker will read, enqueues an arq job, and returns
-                  {"job_id": str, "filename": str}. Returns *immediately* —
-                  the heavy extraction runs in worker.py.
+What changed from the prior job-queue version
+─────────────────────────────────────────────
+* Authentication: magic-link only. New endpoints under /auth/*.
+* /upload now requires an authenticated user; the user's id is stored with
+  the job state so /jobs/{id} can authorize.
+* /jobs/{id} returns 404 (not 403) for jobs the current user doesn't own,
+  so the existence of another user's job is not revealed.
+* /results and /results/clear are GONE. Replaced by per-user /syllabi
+  routes. The frontend's prior best-effort wipe of /results is also removed.
+* CORS: allow_origins is now a single explicit FRONTEND_ORIGIN, plus
+  allow_credentials=True so the session cookie rides along.
+* /privacy renders the privacy policy as plain HTML.
 
-GET  /jobs/{id} : returns {status, progress, phase, result?, error?}
-                  by reading the JSON blob worker.py writes to Redis.
-                  Frontend polls this every 2 s.
-
-POST /upload-sync : the previous synchronous extraction path, kept verbatim
-                    as a fallback. Useful for parity testing and for when
-                    Redis/worker aren't running. Disabled by default in
-                    production via UPLOAD_SYNC_ENABLED=false.
-
-GET  /results, DELETE /results/clear : unchanged in shape; backed by
-                    Postgres now via SQLAlchemy. The wire format
-                    [{"filename": ..., "data": ...}, ...] is preserved so
-                    the frontend's persistence layer needs no changes.
-
-Redis-backed concerns
-─────────────────────
-* slowapi rate-limit storage (was in-memory) → REDIS_URL via storage_uri.
-* per-IP active-job counter (was a defaultdict + asyncio.Lock) →
-  INCR/DECR on `active_jobs:<ip>` with a safety TTL.
+Note: this module deliberately does NOT use `from __future__ import
+annotations` — turning FastAPI parameter annotations into strings breaks
+Pydantic v2's TypeAdapter resolution at OpenAPI-build time.
 """
-
-from typing import Annotated
+import json as _json
 import logging
 import os
 import re
@@ -38,21 +26,45 @@ import tempfile
 import unicodedata
 import uuid
 from pathlib import Path
+from typing import Annotated, Optional
 
 import pikepdf
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
-from fastapi import FastAPI, File, HTTPException, Request, UploadFile
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+)
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from slowapi import Limiter
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 from sqlalchemy import delete, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from db import AsyncSessionLocal
-from db_models import Syllabus
+import auth
+from auth import (
+    COOKIE_NAME,
+    clear_session_cookie,
+    create_session,
+    get_current_user,
+    redeem_magic_link,
+    request_magic_link,
+    require_user,
+    revoke_session,
+    set_session_cookie,
+)
+from db import AsyncSessionLocal, get_session
+from db_models import MagicToken, Session as SessionRow, Syllabus, User
+from email_sender import send_magic_link_email
 from jobs import init_job, read_state
+from privacy import render_privacy_html
 from redis_client import REDIS_URL, redis_client
 
 
@@ -60,24 +72,21 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-MAX_FILE_SIZE = 20 * 1024 * 1024   # 20 MB
-CHUNK_SIZE    = 1024 * 1024         # 1 MB streaming chunks
+MAX_FILE_SIZE = 20 * 1024 * 1024
+CHUNK_SIZE    = 1024 * 1024
 MAX_PAGES     = 80
 DOCLING_TIMEOUT_SECONDS = 500
 MAX_ACTIVE_JOBS_PER_IP  = 1
-# Per-IP slot expiry safety net — if the worker crashes mid-job and the
-# DECR never fires, the slot self-clears after this many seconds.
 ACTIVE_JOB_TTL_SECONDS  = 30 * 60
 
-RESULTS_ENABLED      = os.environ.get("RESULTS_ENABLED",      "true").lower() == "true"
-UPLOAD_SYNC_ENABLED  = os.environ.get("UPLOAD_SYNC_ENABLED",  "true").lower() == "true"
-
-# Where the worker reads incoming PDFs. The default tempdir works for single-
-# host dev (api + worker share the filesystem). For multi-host deployments
-# this needs to be a shared volume — flagged in README.md.
 UPLOAD_TMPDIR = os.environ.get("UPLOAD_TMPDIR", tempfile.gettempdir())
 
-# ── Prompt-injection / LLM-output filters (kept here for /upload-sync use) ────
+# Where to send the user after a successful magic-link redemption.
+FRONTEND_ORIGIN  = os.environ.get("FRONTEND_ORIGIN",  "http://localhost:5500")
+BACKEND_BASE_URL = os.environ.get("BACKEND_BASE_URL", "http://localhost:8000")
+
+UPLOAD_SYNC_ENABLED = os.environ.get("UPLOAD_SYNC_ENABLED", "true").lower() == "true"
+
 _INJECTION_PATTERNS = re.compile(
     r"[^\n]*\b(?:ignore|disregard|forget|your instructions|system prompt"
     r"|/etc/|<script|eval\(|base64)\b[^\n]*",
@@ -92,9 +101,6 @@ _SHORT_FIELDS = {"course_title", "course_code", "section_code", "instructor",
 
 
 # ── Rate limiter (Redis-backed) ───────────────────────────────────────────────
-# storage_uri moves slowapi's accounting from in-memory (per-process, lost on
-# restart, broken under multiple workers) to Redis (shared across uvicorn
-# workers and across container restarts).
 limiter = Limiter(
     key_func=get_remote_address,
     storage_uri=REDIS_URL,
@@ -111,13 +117,17 @@ app.state.limiter = limiter
 async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONResponse:
     return JSONResponse(
         status_code=429,
-        content={"detail": "Upload limit reached. Maximum 5 uploads per minute and 20 per hour per IP."},
+        content={"detail": "Too many requests. Try again in a minute."},
     )
 
 
+# CORS now requires an exact origin (no wildcard) because we want the browser
+# to send the session cookie along. allow_credentials=True is incompatible
+# with allow_origins=["*"].
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[FRONTEND_ORIGIN],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -131,51 +141,82 @@ async def _create_arq_pool() -> None:
 
 @app.on_event("shutdown")
 async def _close_arq_pool() -> None:
-    pool: ArqRedis | None = getattr(app.state, "arq", None)
+    pool: Optional[ArqRedis] = getattr(app.state, "arq", None)
     if pool is not None:
         await pool.close()
 
 
-# ── Per-IP slot helpers (Redis) ───────────────────────────────────────────────
-# We use INCR + a TTL on first acquire. The TTL is a best-effort safety net
-# (slot self-clears even if a worker dies); the happy-path DECR runs in the
-# worker's finally clause via /jobs/<id> reads. We over-acquire defensively:
-# if an INCR overshoots, we DECR back and reject.
-def _slot_key(ip: str) -> str:
-    return f"active_jobs:{ip}"
+# ═════════════════════════════════════════════════════════════════════════════
+# AUTH
+# ═════════════════════════════════════════════════════════════════════════════
+@app.post("/auth/login")
+@limiter.limit("5/minute")
+@limiter.limit("20/hour")
+async def auth_login(request: Request) -> dict:
+    """Request a magic link.
 
-
-async def acquire_job_slot(ip: str) -> None:
-    key = _slot_key(ip)
-    new_count = await redis_client.incr(key)
-    if new_count == 1:
-        await redis_client.expire(key, ACTIVE_JOB_TTL_SECONDS)
-    if new_count > MAX_ACTIVE_JOBS_PER_IP:
-        await redis_client.decr(key)
-        raise HTTPException(
-            status_code=429,
-            detail="You already have a file being processed. Please wait for it to finish.",
-        )
-
-
-async def release_job_slot(ip: str) -> None:
-    key = _slot_key(ip)
-    val = await redis_client.decr(key)
-    if val <= 0:
-        # Don't leave stale 0s lying around — they consume keyspace and
-        # confuse debugging. Atomic via DEL.
-        await redis_client.delete(key)
-
-
-# ── Streaming upload (unchanged) ──────────────────────────────────────────────
-async def stream_upload_to_temp(file: UploadFile, *, dirpath: str | None = None) -> str:
-    """Stream file to a temp path in 1 MB chunks; reject the moment size exceeds limit.
-
-    `dirpath` lets the caller place the file in the worker-readable shared
-    directory (UPLOAD_TMPDIR) instead of the OS default tempdir.
+    Always returns the same payload regardless of whether the email already
+    has an account, to prevent enumeration. The user is auto-created on
+    first contact.
     """
+    body = await request.json()
+    email = (body or {}).get("email")
+    if not isinstance(email, str):
+        raise HTTPException(status_code=400, detail="Email is required.")
+
+    raw_token, user = await request_magic_link(email)
+    link = f"{BACKEND_BASE_URL}/auth/verify?token={raw_token}"
+    await send_magic_link_email(user.email, link)
+
+    # Generic, non-revealing response.
+    return {"ok": True, "message": "If that email is valid, a sign-in link is on its way."}
+
+
+@app.get("/auth/verify")
+async def auth_verify(
+    token: str,
+    response: Response,
+    db: AsyncSession = Depends(get_session),
+):
+    """Validate a magic token, mint a session, set the cookie, redirect to
+    the frontend."""
+    user = await redeem_magic_link(token, db)
+    raw_session = await create_session(user.id, db)
+
+    redirect = RedirectResponse(url=f"{FRONTEND_ORIGIN}/?logged_in=1", status_code=303)
+    set_session_cookie(redirect, raw_session)
+    return redirect
+
+
+@app.get("/auth/me")
+async def auth_me(user: Optional[User] = Depends(get_current_user)) -> dict:
+    if user is None:
+        return {"authenticated": False}
+    return {
+        "authenticated": True,
+        "user": {"id": str(user.id), "email": user.email},
+    }
+
+
+@app.post("/auth/logout")
+async def auth_logout(
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    raw = request.cookies.get(COOKIE_NAME)
+    if raw:
+        await revoke_session(raw, db)
+    clear_session_cookie(response)
+    return {"ok": True}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# UPLOAD HELPERS
+# ═════════════════════════════════════════════════════════════════════════════
+async def stream_upload_to_temp(file: UploadFile, *, dirpath: Optional[str] = None) -> str:
     total = 0
-    tmp_path: str | None = None
+    tmp_path: Optional[str] = None
     target_dir = dirpath or tempfile.gettempdir()
     try:
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", dir=target_dir) as tmp:
@@ -205,7 +246,6 @@ def sanitize_filename(raw: str) -> str:
 
 
 def inspect_pdf(path: str) -> None:
-    """Validate structure, page count, encryption, and attachments."""
     try:
         with pikepdf.open(path) as pdf:
             page_count = len(pdf.pages)
@@ -233,12 +273,7 @@ def inspect_pdf(path: str) -> None:
         raise HTTPException(status_code=422, detail="PDF could not be safely opened.")
 
 
-async def _validate_pdf(file: UploadFile, *, dirpath: str | None = None) -> tuple[str, str]:
-    """Shared validation pipeline for both /upload and /upload-sync.
-
-    Returns (tmp_path, safe_filename) on success. Caller owns tmp_path
-    cleanup if it doesn't enqueue downstream.
-    """
+async def _validate_pdf(file: UploadFile, *, dirpath: Optional[str] = None) -> tuple[str, str]:
     if file.content_type not in ("application/pdf", "application/octet-stream"):
         raise HTTPException(status_code=400, detail="Only PDF files are accepted.")
 
@@ -250,7 +285,6 @@ async def _validate_pdf(file: UploadFile, *, dirpath: str | None = None) -> tupl
             magic = f.read(4)
         if magic != b"%PDF":
             raise HTTPException(status_code=415, detail="File does not appear to be a valid PDF.")
-
         inspect_pdf(tmp_path)
     except Exception:
         if os.path.exists(tmp_path):
@@ -260,17 +294,42 @@ async def _validate_pdf(file: UploadFile, *, dirpath: str | None = None) -> tupl
     return tmp_path, safe_filename
 
 
+def _slot_key(ip: str) -> str:
+    return f"active_jobs:{ip}"
+
+
+async def acquire_job_slot(ip: str) -> None:
+    key = _slot_key(ip)
+    new_count = await redis_client.incr(key)
+    if new_count == 1:
+        await redis_client.expire(key, ACTIVE_JOB_TTL_SECONDS)
+    if new_count > MAX_ACTIVE_JOBS_PER_IP:
+        await redis_client.decr(key)
+        raise HTTPException(
+            status_code=429,
+            detail="You already have a file being processed. Please wait for it to finish.",
+        )
+
+
+async def release_job_slot(ip: str) -> None:
+    key = _slot_key(ip)
+    val = await redis_client.decr(key)
+    if val <= 0:
+        await redis_client.delete(key)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
-# /upload — async (job-queue) path. This is what the frontend talks to.
+# /upload  (now requires auth)
 # ═════════════════════════════════════════════════════════════════════════════
 @app.post("/upload")
 @limiter.limit("5/minute")
 @limiter.limit("20/hour")
-async def upload_syllabus(request: Request, file: Annotated[UploadFile, File()]) -> dict:
+async def upload_syllabus(
+    request: Request,
+    file: Annotated[UploadFile, File()],
+    user: User = Depends(require_user),
+) -> dict:
     client_ip = get_remote_address(request)
-
-    # Place the temp file inside UPLOAD_TMPDIR so the worker (potentially a
-    # different process) can read it. On single-host dev this is just /tmp.
     tmp_path, safe_filename = await _validate_pdf(file, dirpath=UPLOAD_TMPDIR)
 
     try:
@@ -280,18 +339,17 @@ async def upload_syllabus(request: Request, file: Annotated[UploadFile, File()])
         raise
 
     job_id = uuid.uuid4().hex
+    user_id_str = str(user.id)
     try:
-        await init_job(job_id)
-        # Enqueue with our generated id so we know the lookup key up-front.
-        # If arq dedupes a colliding id (extremely unlikely with hex UUIDs)
-        # it returns None and we treat that as enqueue failure.
+        await init_job(job_id, user_id=user_id_str)
         enqueued = await app.state.arq.enqueue_job(
-            "process_syllabus", job_id, tmp_path, safe_filename, _job_id=job_id,
+            "process_syllabus",
+            job_id, tmp_path, safe_filename, user_id_str,
+            _job_id=job_id,
         )
         if enqueued is None:
             raise HTTPException(status_code=500, detail="Could not enqueue job.")
     except Exception:
-        # Clean up if enqueue itself fails — the worker would have owned this.
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
         await release_job_slot(client_ip)
@@ -301,46 +359,50 @@ async def upload_syllabus(request: Request, file: Annotated[UploadFile, File()])
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# /jobs/{id} — frontend polls this every 2 s while a job is running.
+# /jobs/{id}  (scoped to current user)
 # ═════════════════════════════════════════════════════════════════════════════
 @app.get("/jobs/{job_id}")
-async def get_job(job_id: str, request: Request) -> dict:
+async def get_job(
+    job_id: str,
+    request: Request,
+    user: User = Depends(require_user),
+) -> dict:
     state = await read_state(job_id)
-    if state is None:
+
+    # Two failure modes deliberately collapse to 404 so we don't reveal that
+    # *some* user has a job with this id:
+    #   1. job doesn't exist
+    #   2. job exists but belongs to someone else
+    if state is None or state.get("user_id") != str(user.id):
         raise HTTPException(status_code=404, detail="Unknown job id.")
 
-    # Release the per-IP slot exactly once when the job leaves the running
-    # state. Doing this here (rather than in the worker) keeps the IP↔slot
-    # mapping out of the worker's concerns. The slot key has a TTL backstop
-    # so this branch failing is non-fatal.
     if state["status"] in ("complete", "failed"):
         client_ip = get_remote_address(request)
-        # Marker key so concurrent pollers can't double-decrement.
         marker = f"job:{job_id}:slot_released"
         was_set = await redis_client.set(marker, "1", ex=3600, nx=True)
         if was_set:
             await release_job_slot(client_ip)
 
-    return state
+    # Strip user_id from the response — callers don't need it and it's
+    # internal bookkeeping.
+    return {k: v for k, v in state.items() if k != "user_id"}
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# /upload-sync — legacy synchronous path, kept as fallback.
+# /upload-sync  (legacy fallback, now also auth-gated and user-scoped)
 # ═════════════════════════════════════════════════════════════════════════════
-# Lives behind UPLOAD_SYNC_ENABLED so production can disable it. Useful for:
-#   * end-to-end parity tests without Redis/worker running
-#   * curl debugging when you want the parsed JSON in one call
-#   * fallback if arq has a problem we haven't diagnosed yet
 @app.post("/upload-sync")
 @limiter.limit("5/minute")
 @limiter.limit("20/hour")
-async def upload_syllabus_sync(request: Request, file: Annotated[UploadFile, File()]) -> dict:
+async def upload_syllabus_sync(
+    request: Request,
+    file: Annotated[UploadFile, File()],
+    user: User = Depends(require_user),
+) -> dict:
     if not UPLOAD_SYNC_ENABLED:
         raise HTTPException(status_code=403, detail="The synchronous upload path is disabled.")
 
-    # Imports kept local — these modules are heavy and only needed on this path.
     import concurrent.futures
-    import json as _json
 
     from constants import CONTEXT_SIZES
     from extractor import extract_document
@@ -370,9 +432,6 @@ async def upload_syllabus_sync(request: Request, file: Annotated[UploadFile, Fil
         pruned_blocks = prune_blocks_to_context_limit(blocks, CONTEXT_SIZES["fast"])
         raw_text = "\n\n".join(b.text for b in pruned_blocks)
 
-        # Inline the same sanitizer used by the worker — duplicated rather
-        # than imported because worker.py imports lots of arq machinery we
-        # don't want loaded just to serve /upload-sync.
         text = "".join(
             ch for ch in raw_text
             if ch in ("\n", "\t") or not unicodedata.category(ch).startswith("C")
@@ -397,7 +456,6 @@ async def upload_syllabus_sync(request: Request, file: Annotated[UploadFile, Fil
             logger.exception("LLM output failed schema validation")
             raise HTTPException(status_code=502, detail="LLM output failed validation.")
 
-        # Inline LLM output validator — see note above.
         def _check(v, path: str) -> None:
             if isinstance(v, str):
                 if _REJECT_PATTERNS.search(v):
@@ -413,9 +471,8 @@ async def upload_syllabus_sync(request: Request, file: Annotated[UploadFile, Fil
 
         _check(parsed_json, "root")
 
-        # Persist via Postgres (was sqlite3 in v1).
         async with AsyncSessionLocal() as session:
-            session.add(Syllabus(filename=safe_filename, data=parsed_json))
+            session.add(Syllabus(user_id=user.id, filename=safe_filename, data=parsed_json))
             await session.commit()
 
         return {"filename": safe_filename, "data": parsed_json}
@@ -431,36 +488,123 @@ async def upload_syllabus_sync(request: Request, file: Annotated[UploadFile, Fil
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# /results — same wire shape as v1, backed by Postgres.
+# /syllabi  (per-user)
 # ═════════════════════════════════════════════════════════════════════════════
-RESULTS_MAX_AGE_HOURS: int = int(os.environ.get("RESULTS_MAX_AGE_HOURS", "24"))
+@app.get("/syllabi")
+async def list_syllabi(
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    rows = (
+        await db.execute(
+            select(Syllabus.id, Syllabus.filename, Syllabus.data, Syllabus.created_at)
+            .where(Syllabus.user_id == user.id)
+            .order_by(Syllabus.created_at.asc())
+        )
+    ).all()
+    return [
+        {
+            "id":         str(r.id),
+            "filename":   r.filename,
+            "data":       r.data,
+            "created_at": r.created_at.isoformat(),
+        }
+        for r in rows
+    ]
 
 
-@app.get("/results")
-async def get_results() -> list[dict]:
-    if not RESULTS_ENABLED:
-        raise HTTPException(status_code=403, detail="This endpoint is disabled.")
+@app.patch("/syllabi/{syllabus_id}")
+async def patch_syllabus(
+    syllabus_id: str,
+    request: Request,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """Update the courses array inside a syllabus row.
 
-    from datetime import datetime, timedelta, timezone
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=RESULTS_MAX_AGE_HOURS)
+    Called when the user deletes a single course from a PDF that contained
+    multiple courses — the row survives but with the deleted course removed.
+    The WHERE clause is pinned to user_id so cross-user writes are impossible.
+    """
+    try:
+        sid = uuid.UUID(syllabus_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Not found.")
 
-    async with AsyncSessionLocal() as session:
-        rows = (
-            await session.execute(
-                select(Syllabus.filename, Syllabus.data)
-                .where(Syllabus.created_at >= cutoff)
-                .order_by(Syllabus.created_at.asc())
-            )
-        ).all()
+    body = await request.json()
+    updated_courses = body.get("courses")
+    if not isinstance(updated_courses, list):
+        raise HTTPException(status_code=400, detail="'courses' must be a list.")
 
-    return [{"filename": r.filename, "data": r.data} for r in rows]
+    result = await db.execute(
+        select(Syllabus).where(Syllabus.id == sid, Syllabus.user_id == user.id)
+    )
+    row: Syllabus | None = result.scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Not found.")
+
+    # Merge into the existing data blob so any other top-level keys
+    # (instructor, term, etc. at the syllabus level) are preserved.
+    row.data = {**row.data, "courses": updated_courses}
+    await db.commit()
+    return {"updated": True}
 
 
-@app.delete("/results/clear")
-async def delete_results() -> dict:
-    if not RESULTS_ENABLED:
-        raise HTTPException(status_code=403, detail="This endpoint is disabled.")
-    async with AsyncSessionLocal() as session:
-        await session.execute(delete(Syllabus))
-        await session.commit()
-    return {"cleared": True}
+@app.delete("/syllabi/{syllabus_id}")
+async def delete_syllabus(
+    syllabus_id: str,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """Delete one syllabus owned by the current user.
+
+    The WHERE clause is pinned to user_id so cross-user delete attempts can
+    never match. We surface 404 — not 403 — to avoid revealing that the id
+    exists for another user.
+    """
+    try:
+        sid = uuid.UUID(syllabus_id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Not found.")
+
+    result = await db.execute(
+        delete(Syllabus).where(Syllabus.id == sid, Syllabus.user_id == user.id)
+    )
+    await db.commit()
+    if result.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Not found.")
+    return {"deleted": True}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# /account  — full deletion
+# ═════════════════════════════════════════════════════════════════════════════
+@app.delete("/account")
+async def delete_account(
+    response: Response,
+    user: User = Depends(require_user),
+    db: AsyncSession = Depends(get_session),
+) -> dict:
+    """Wipe the current user's data and sign them out.
+
+    syllabi/sessions/magic_tokens cascade-delete via the FK constraint, so
+    deleting the User row drops everything in one statement. We do it
+    explicitly anyway to be unambiguous.
+    """
+    uid = user.id
+    await db.execute(delete(Syllabus).where(Syllabus.user_id == uid))
+    await db.execute(delete(SessionRow).where(SessionRow.user_id == uid))
+    await db.execute(delete(MagicToken).where(MagicToken.user_id == uid))
+    await db.execute(delete(User).where(User.id == uid))
+    await db.commit()
+
+    clear_session_cookie(response)
+    return {"deleted": True}
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# /privacy
+# ═════════════════════════════════════════════════════════════════════════════
+@app.get("/privacy", response_class=HTMLResponse)
+async def privacy() -> HTMLResponse:
+    return HTMLResponse(content=render_privacy_html())

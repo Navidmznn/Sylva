@@ -21,15 +21,49 @@ import {
 import { renderGradeCalc } from './gradeCalc.js';
 import { showToast, showConfirm } from './utils.js';
 
+// ── Backend base URL + credentialed fetch helper ─────────────────────────────
+// Every call to the backend must include credentials (the session cookie).
+// `apiFetch` wraps fetch() to set credentials: 'include' uniformly, throws on
+// non-2xx with the server's `detail` message, and returns parsed JSON on 2xx
+// (or null for 204). Pass `parseJson: false` for endpoints with non-JSON
+// responses (none currently used here, but keeps the door open).
+const API_BASE = 'http://localhost:8000';
+
+async function apiFetch(path, { method = 'GET', body, headers, parseJson = true } = {}) {
+  const opts = {
+    method,
+    credentials: 'include',
+    headers: { ...(headers || {}) },
+  };
+  if (body !== undefined) {
+    if (body instanceof FormData) {
+      opts.body = body; // browser sets Content-Type with boundary
+    } else {
+      opts.body = JSON.stringify(body);
+      opts.headers['Content-Type'] = 'application/json';
+    }
+  }
+  const res = await fetch(`${API_BASE}${path}`, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    const e = new Error(err.detail || `Request failed (${res.status})`);
+    e.status = res.status;
+    throw e;
+  }
+  if (!parseJson || res.status === 204) return null;
+  return res.json();
+}
+
 const uploadBtn    = document.querySelector('.upload-btn');
 const fileInput    = document.querySelector('.file-input');
 const loadingModal = document.getElementById('loading-modal');
 const clearDataBtn = document.getElementById('clear-data-btn');
 
 // ── localStorage persistence ─────────────────────────────────────────────────
-// The backend SQLite DB stores every upload as the source of truth.
-// localStorage is the restore layer — it's synchronous, zero-network, and
-// survives hard refreshes without a backend round-trip.
+// localStorage caches the parsed-syllabus JSON for instant render on reload.
+// Server-side syllabi are managed via /syllabi (list) and DELETE /syllabi/{id}
+// (single) and DELETE /account (everything). Clearing localStorage does not
+// touch the backend.
 const LS_KEY        = 'syllabusApp_courses';
 const LS_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
 
@@ -85,12 +119,45 @@ function renderAllSections() {
 }
 
 // ── Restore saved data on page load ─────────────────────────────────────────
+// Strategy:
+//   Logged in  → fetch GET /syllabi from the backend (source of truth).
+//                Each syllabus row's `data.courses` array is merged in.
+//                Also re-writes localStorage so subsequent fast-reloads
+//                don't need another round-trip.
+//   Logged out → fall back to localStorage (guest / offline mode).
 async function initFromStorage() {
+  if (authState.user) {
+    try {
+      const syllabi = await apiFetch('/syllabi');
+      if (!Array.isArray(syllabi) || syllabi.length === 0) return;
+
+      // Each /syllabi row has shape { id, filename, data, created_at }.
+      // `data` is the full parsed syllabus object; `data.courses` is the
+      // array of courses that addCourses() expects.
+      // Tag each course with the backend syllabus row it came from.
+      // The delete handler uses this to update or remove the right row.
+      const allCourses = syllabi.flatMap(s =>
+        (s.data?.courses ?? []).map(c => ({ ...c, _syllabusId: s.id }))
+      );
+      if (allCourses.length === 0) return;
+
+      await addCourses(allCourses);
+      renderAllSections();
+      clearDataBtn.style.display = 'inline-flex';
+
+      // Warm localStorage so a hard-reload while still logged in is instant.
+      persistCourses();
+      console.log(`[Syllabus App] Restored ${allCourses.length} course(s) from backend.`);
+      return;
+    } catch (e) {
+      // Network error or 401 — fall through to localStorage.
+      console.warn('[Syllabus App] Backend restore failed, falling back to localStorage:', e.message);
+    }
+  }
+
+  // Logged-out path (or backend unreachable).
   const saved = loadPersistedCourses();
   if (saved.length === 0) return;
-
-  // No onDuplicate — fresh-load arrays can't contain dupes against an empty
-  // courses[]. Async only because addCourses returns a promise.
   await addCourses(saved);
   renderAllSections();
   clearDataBtn.style.display = 'inline-flex';
@@ -119,8 +186,33 @@ deleteCourseBtn.addEventListener('click', async () => {
 
   removeCourse(idx);
 
-  // If that was the last course, the app reverts to its empty state — easiest
-  // path is the same teardown as Clear-all so all sections collapse cleanly.
+  // Sync deletion to the backend when logged in.
+  // `target._syllabusId` is set during backend hydration (initFromStorage).
+  // If the course came from localStorage only it won't be set — skip silently.
+  if (authState.user && target._syllabusId) {
+    const syllabusId = target._syllabusId;
+    // Check how many remaining courses still belong to this syllabus row.
+    const siblingsLeft = courses.filter(c => c._syllabusId === syllabusId);
+
+    if (siblingsLeft.length === 0) {
+      // No courses left from this PDF — delete the whole Syllabus row.
+      apiFetch(`/syllabi/${syllabusId}`, { method: 'DELETE' }).catch(e => {
+        console.warn('[Syllabus App] Backend delete failed:', e.message);
+      });
+    } else {
+      // Other courses from the same PDF survive — patch the row to remove
+      // just this one from its data.courses array.
+      const updatedCourses = siblingsLeft.map(({ _syllabusId: _, ...c }) => c);
+      apiFetch(`/syllabi/${syllabusId}`, {
+        method: 'PATCH',
+        body: { courses: updatedCourses },
+      }).catch(e => {
+        console.warn('[Syllabus App] Backend patch failed:', e.message);
+      });
+    }
+  }
+
+  // If that was the last course, the app reverts to its empty state.
   if (courses.length === 0) {
     clearPersistedCourses();
     window.location.reload();
@@ -132,27 +224,33 @@ deleteCourseBtn.addEventListener('click', async () => {
   showToast(`Deleted ${label}.`, 'success');
 });
 
-// ── Clear saved data ─────────────────────────────────────────────────────────
+// ── Clear browser data ──────────────────────────────────────────────────────
+// Wipes the localStorage cache only. Backend syllabi are managed via the
+// per-syllabus delete UI and DELETE /account; this button does not touch
+// the server.
 clearDataBtn.addEventListener('click', async () => {
   const ok = await showConfirm({
-    title: 'Clear all saved syllabi?',
-    message: 'Every uploaded course and its extracted data will be removed. This cannot be undone.',
-    confirmLabel: 'Clear all',
+    title: 'Clear browser cache?',
+    message: 'This removes the locally cached copy of your syllabi from this browser. Your account and saved syllabi on the server are not affected.',
+    confirmLabel: 'Clear cache',
     cancelLabel: 'Keep them',
     danger: true,
   });
   if (!ok) return;
 
   clearPersistedCourses();
-
-  // Best-effort backend clear — does not block or fail the UI reset.
-  fetch('http://localhost:8000/results/clear', { method: 'DELETE' }).catch(() => {});
-
   window.location.reload();
 });
 
 // ── Upload flow ─────────────────────────────────────────────────────────────
-uploadBtn.addEventListener('click', () => fileInput.click());
+uploadBtn.addEventListener('click', () => {
+  if (!authState.user) {
+    showToast('Please sign in first to upload a syllabus.', 'warning');
+    document.getElementById('auth-email')?.focus();
+    return;
+  }
+  fileInput.click();
+});
 
 fileInput.addEventListener('change', async () => {
   const file = fileInput.files[0];
@@ -182,20 +280,20 @@ fileInput.addEventListener('change', async () => {
     const formData = new FormData();
     formData.append('file', file);
 
-    // 1. Validate-and-enqueue. This returns ~immediately; the heavy
-    //    extraction runs in the worker.
-    const response = await fetch('http://localhost:8000/upload', {
-      method: 'POST',
-      body: formData,
-    });
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      throw new Error(err.detail || 'Upload failed');
+    // 1. Validate-and-enqueue. Returns ~immediately; heavy work runs in the
+    //    worker. apiFetch sends credentials so the server identifies the user.
+    let enqueue;
+    try {
+      enqueue = await apiFetch('/upload', { method: 'POST', body: formData });
+    } catch (e) {
+      if (e.status === 401) {
+        // Session expired since the page loaded — refresh widget and bail.
+        await refreshAuth();
+        throw new Error('Your session expired. Please sign in again.');
+      }
+      throw e;
     }
-
-    const enqueue = await response.json();
-    if (!enqueue.job_id) throw new Error('Server did not return a job id.');
+    if (!enqueue?.job_id) throw new Error('Server did not return a job id.');
 
     // 2. Poll /jobs/<id> every 2 seconds until terminal state.
     const result = await pollJobUntilDone(enqueue.job_id, {
@@ -286,7 +384,9 @@ async function pollJobUntilDone(jobId, { intervalMs = 2000, onProgress } = {}) {
       throw new Error('Processing timed out. Please try again.');
     }
 
-    const res = await fetch(`http://localhost:8000/jobs/${encodeURIComponent(jobId)}`);
+    const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}`, {
+      credentials: 'include',
+    });
     if (res.status === 404) throw new Error('Job not found — may have expired.');
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -333,5 +433,127 @@ document.querySelector('.hamburger').addEventListener('click', () => {
   document.querySelector('.nav-links').classList.toggle('nav-links--mobile-open');
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// AUTH — magic-link login UI in the header
+// ═══════════════════════════════════════════════════════════════════════════
+// Tiny module-level state. Other handlers consult `authState.user` to gate
+// actions (e.g. the upload button). We never read or write the session cookie
+// from JS — it's httpOnly. We only ever ask the backend "who am I?" via
+// GET /auth/me.
+
+const authState = { user: null };
+
+const authWidget    = document.getElementById('auth-widget');
+const authLoginForm = document.getElementById('auth-login-form');
+const authEmailIn   = document.getElementById('auth-email');
+const authUserBox   = document.getElementById('auth-user');
+const authEmailPill = document.getElementById('auth-email-pill');
+const authLogoutBtn = document.getElementById('auth-logout-btn');
+const authDeleteBtn = document.getElementById('auth-delete-btn');
+
+function renderAuth() {
+  if (authState.user) {
+    authWidget.dataset.state = 'in';
+    authLoginForm.hidden = true;
+    authUserBox.hidden = false;
+    authEmailPill.textContent = authState.user.email;
+  } else {
+    authWidget.dataset.state = 'out';
+    authLoginForm.hidden = false;
+    authUserBox.hidden = true;
+  }
+}
+
+async function refreshAuth() {
+  try {
+    const me = await apiFetch('/auth/me');
+    authState.user = me?.authenticated ? me.user : null;
+  } catch {
+    authState.user = null;
+  }
+  renderAuth();
+}
+
+authLoginForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const email = authEmailIn.value.trim();
+  if (!email) return;
+
+  const submitBtn = authLoginForm.querySelector('button[type="submit"]');
+  const original = submitBtn.textContent;
+  submitBtn.disabled = true;
+  submitBtn.textContent = 'Sending...';
+
+  try {
+    await apiFetch('/auth/login', { method: 'POST', body: { email } });
+    showToast('Check your email for a sign-in link. (In dev mode, check the API console.)', 'success', 7000);
+    authEmailIn.value = '';
+  } catch (e) {
+    showToast(e.message || 'Could not send link.', 'error');
+  } finally {
+    submitBtn.disabled = false;
+    submitBtn.textContent = original;
+  }
+});
+
+authLogoutBtn.addEventListener('click', async () => {
+  try {
+    await apiFetch('/auth/logout', { method: 'POST' });
+  } catch {
+    // Logout is best-effort. The cookie clear is server-driven; we still
+    // refresh local state below regardless.
+  }
+  authState.user = null;
+  renderAuth();
+  // Wipe localStorage too — the cached courses belonged to the prior user.
+  clearPersistedCourses();
+  showToast('Logged out.', 'info');
+  // Reload to reset every other module's in-memory state cleanly.
+  setTimeout(() => window.location.reload(), 400);
+});
+
+authDeleteBtn.addEventListener('click', async () => {
+  const ok = await showConfirm({
+    title: 'Delete your account?',
+    message: 'This permanently deletes all your saved syllabi, sessions, and your account. This cannot be undone.',
+    confirmLabel: 'Delete account',
+    cancelLabel: 'Keep account',
+    danger: true,
+  });
+  if (!ok) return;
+  // Second confirmation — destructive + irreversible.
+  const reallyOk = await showConfirm({
+    title: 'Are you sure?',
+    message: 'Last chance — this is permanent.',
+    confirmLabel: 'Yes, delete it',
+    cancelLabel: 'Cancel',
+    danger: true,
+  });
+  if (!reallyOk) return;
+
+  try {
+    await apiFetch('/account', { method: 'DELETE' });
+  } catch (e) {
+    showToast(e.message || 'Account deletion failed.', 'error');
+    return;
+  }
+  authState.user = null;
+  clearPersistedCourses();
+  showToast('Account deleted.', 'success');
+  setTimeout(() => window.location.reload(), 600);
+});
+
+// ── If we just landed from a magic-link redirect, surface a success toast ──
+if (new URLSearchParams(window.location.search).get('logged_in') === '1') {
+  showToast('Signed in.', 'success');
+  // Clean the query string so refreshing doesn't re-fire the toast.
+  const url = new URL(window.location.href);
+  url.searchParams.delete('logged_in');
+  window.history.replaceState({}, '', url.toString());
+}
+
 // ── Init ─────────────────────────────────────────────────────────────────────
-initFromStorage();
+(async () => {
+  await refreshAuth();
+  await initFromStorage();
+})();

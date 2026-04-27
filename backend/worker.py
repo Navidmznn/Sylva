@@ -118,14 +118,20 @@ def _run_extraction_with_timeout(tmp_path: str):
 
 
 # ── The actual job ────────────────────────────────────────────────────────────
-async def process_syllabus(ctx: dict, job_id: str, tmp_path: str, safe_filename: str) -> dict:
+async def process_syllabus(
+    ctx: dict,
+    job_id: str,
+    tmp_path: str,
+    safe_filename: str,
+    user_id: str,
+) -> dict:
     """Run the full extraction pipeline and persist the result.
 
-    The return value is also what `arq` records as the job's result, but
-    callers should poll Redis state via `jobs.read_state` for the user-facing
-    status — that's where progress and phase labels live.
+    `user_id` is the UUID (as str) of the User who uploaded — supplied by
+    the API at enqueue time. The persisted Syllabus row is FK-bound to it,
+    and the result is read by /jobs/{id} only for the matching user.
     """
-    logger.info("[%s] starting job for %s", job_id, safe_filename)
+    logger.info("[%s] starting job for %s (user=%s)", job_id, safe_filename, user_id)
 
     try:
         # ── Phase: extracting ────────────────────────────────────────────────
@@ -162,6 +168,7 @@ async def process_syllabus(ctx: dict, job_id: str, tmp_path: str, safe_filename:
         async with AsyncSessionLocal() as session:
             await session.execute(
                 insert(Syllabus).values(
+                    user_id=user_id,
                     filename=safe_filename,
                     data=parsed_json,
                     job_id=job_id,

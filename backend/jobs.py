@@ -59,9 +59,9 @@ def _key(job_id: str) -> str:
     return f"job:{job_id}"
 
 
-async def init_job(job_id: str) -> None:
+async def init_job(job_id: str, user_id: str) -> None:
     """Write the initial 'queued' state. Called by the API after enqueue."""
-    await write_state(job_id, status="queued", phase="queued")
+    await write_state(job_id, status="queued", phase="queued", user_id=user_id)
 
 
 async def write_state(
@@ -71,14 +71,25 @@ async def write_state(
     phase: str,
     result: dict | None = None,
     error: str | None = None,
+    user_id: str | None = None,
 ) -> None:
-    """Replace the job's state document. The worker calls this once per phase."""
+    """Replace the job's state document.
+
+    Worker calls this once per phase. `user_id` is sticky: the worker passes
+    None and we preserve whatever the API initially set, so authorization
+    checks in /jobs/{id} keep working across phase transitions.
+    """
+    if user_id is None:
+        prior = await read_state(job_id)
+        user_id = (prior or {}).get("user_id")
+
     payload: dict[str, Any] = {
         "status":     status,
         "progress":   PHASE_PROGRESS.get(phase, 0),
         "phase":      PHASE_LABELS.get(phase, phase),
         "result":     result,
         "error":      error,
+        "user_id":    user_id,
         "updated_at": datetime.now(timezone.utc).isoformat(),
     }
     await redis_client.set(_key(job_id), json.dumps(payload), ex=JOB_STATE_TTL_SECONDS)
