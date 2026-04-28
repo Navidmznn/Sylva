@@ -1,15 +1,6 @@
-"""
-email_sender.py — async email abstraction.
-
-Two modes selected via EMAIL_MODE:
-  * console — prints the magic link to stdout. The default for local dev so
-              you don't need an SMTP account to test the flow end-to-end.
-  * smtp    — sends via stdlib smtplib (TLS optional), executed on a
-              threadpool because smtplib is sync.
-
-Choosing stdlib over aiosmtplib keeps requirements.txt unchanged. Email
-sending is not on a hot path, so the threadpool detour is negligible.
-"""
+"""Async email helper. EMAIL_MODE=console prints to stdout (default for dev);
+EMAIL_MODE=smtp sends via stdlib smtplib on a threadpool. stdlib over
+aiosmtplib keeps requirements minimal — sending isn't on a hot path."""
 from __future__ import annotations
 
 import asyncio
@@ -32,7 +23,7 @@ SMTP_USE_TLS: bool = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
 
 
 def _send_smtp_blocking(to_email: str, subject: str, body: str) -> None:
-    """Synchronous SMTP send. Runs inside asyncio.to_thread."""
+    """Sync send. Called via asyncio.to_thread."""
     msg = EmailMessage()
     msg["From"] = SMTP_FROM
     msg["To"] = to_email
@@ -40,7 +31,7 @@ def _send_smtp_blocking(to_email: str, subject: str, body: str) -> None:
     msg.set_content(body)
 
     if SMTP_USE_TLS:
-        # STARTTLS upgrade (port 587 typical).
+        # STARTTLS upgrade on port 587.
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as smtp:
             smtp.ehlo()
             smtp.starttls(context=ssl.create_default_context())
@@ -49,7 +40,7 @@ def _send_smtp_blocking(to_email: str, subject: str, body: str) -> None:
                 smtp.login(SMTP_USER, SMTP_PASSWORD)
             smtp.send_message(msg)
     else:
-        # Implicit TLS (port 465) — uncommon but supported.
+        # Implicit TLS on port 465.
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15,
                               context=ssl.create_default_context()) as smtp:
             if SMTP_USER:
@@ -58,7 +49,6 @@ def _send_smtp_blocking(to_email: str, subject: str, body: str) -> None:
 
 
 async def send_magic_link_email(to_email: str, link: str) -> None:
-    """Send the magic link (or print it, in console mode)."""
     subject = "Your syllabus.ai sign-in link"
     body = (
         "Hi,\n\n"
@@ -69,8 +59,7 @@ async def send_magic_link_email(to_email: str, link: str) -> None:
     )
 
     if EMAIL_MODE == "console" or not SMTP_HOST:
-        # Print rather than log — easier to spot in dev terminals, and also
-        # logged at INFO so it shows up in structured log capture.
+        # Print rather than log so it's easy to spot in dev terminals.
         banner = "─" * 64
         print(f"\n{banner}\n[email] To: {to_email}\n[email] {link}\n{banner}\n", flush=True)
         logger.info("Magic link for %s: %s", to_email, link)
@@ -80,7 +69,6 @@ async def send_magic_link_email(to_email: str, link: str) -> None:
         await asyncio.to_thread(_send_smtp_blocking, to_email, subject, body)
         logger.info("Magic link sent to %s via SMTP", to_email)
     except Exception:
-        # Don't surface SMTP errors to the client — that would let an attacker
-        # learn whether SMTP is misconfigured by triggering /auth/login. Log
-        # and silently succeed; the user just won't get an email.
+        # Swallow SMTP errors — surfacing them would let an attacker probe
+        # SMTP config via /auth/login. The user simply won't get an email.
         logger.exception("SMTP send failed for %s", to_email)

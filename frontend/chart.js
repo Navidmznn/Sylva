@@ -1,8 +1,7 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   CHART — pie chart of assessment weights + per-card course dropdown
-   Legend rows are editable: click Edit → inline inputs → Save writes back
-   to state and re-renders the chart + persists via custom event.
-═══════════════════════════════════════════════════════════════════════════ */
+// Pie chart of assessment weights + per-card course dropdown. Legend rows
+// are editable: Edit → inline inputs → Save writes back to state and
+// re-renders, then dispatches syllabusapp:assessmentupdated for app.js to
+// persist and sync other views.
 
 import { courses } from './state.js';
 import { escapeHtml } from './utils.js';
@@ -24,10 +23,8 @@ const canvasEl   = document.getElementById('pie-chart');
 const dropdownEl = document.getElementById('drop-menu');
 
 let chartInstance  = null;
-let _editingIndex  = null; // assessment index currently open for editing
-let _currentIndex  = 0;   // which course is displayed
-
-// ── Renderers ─────────────────────────────────────────────────────────────────
+let _editingIndex  = null;
+let _currentIndex  = 0;
 
 function renderLegendItem(a, i, color) {
   return `
@@ -103,17 +100,14 @@ function buildLegend(courseIndex) {
 }
 
 function attachLegendListeners(courseIndex, assessments) {
-  // Edit buttons on normal rows
   legendEl.querySelectorAll('.legend-edit-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       _editingIndex = parseInt(btn.dataset.index);
       buildLegend(courseIndex);
-      // Focus the title input immediately
       legendEl.querySelector('.legend-edit-title')?.focus();
     });
   });
 
-  // Save / cancel on the editing row
   legendEl.querySelector('.legend-save-btn')?.addEventListener('click', () => {
     commitEdit(courseIndex);
   });
@@ -123,7 +117,6 @@ function attachLegendListeners(courseIndex, assessments) {
     buildLegend(courseIndex);
   });
 
-  // Keyboard shortcuts inside the edit inputs
   legendEl.querySelectorAll('.legend-edit-input').forEach(input => {
     input.addEventListener('keydown', e => {
       if (e.key === 'Enter')  commitEdit(courseIndex);
@@ -134,8 +127,6 @@ function attachLegendListeners(courseIndex, assessments) {
     });
   });
 }
-
-// ── Commit edit to state ──────────────────────────────────────────────────────
 
 function commitEdit(courseIndex) {
   const i          = _editingIndex;
@@ -152,16 +143,11 @@ function commitEdit(courseIndex) {
   if (!isNaN(newWeight) && newWeight >= 0)  assessment.weight_percent = newWeight;
 
   _editingIndex = null;
-
-  // Re-render chart with updated data (no animation flash — skip the
-  // slide-in by not toggling the animate class here).
   rebuildChart(courseIndex);
 
   // Notify app.js: persist + sync other views.
   window.dispatchEvent(new CustomEvent('syllabusapp:assessmentupdated'));
 }
-
-// ── Chart rebuild ─────────────────────────────────────────────────────────────
 
 function rebuildChart(courseIndex) {
   const course      = courses[courseIndex];
@@ -200,21 +186,17 @@ function rebuildChart(courseIndex) {
   });
 }
 
-// ── Public API ────────────────────────────────────────────────────────────────
-
 export function renderChart(index) {
   const course = courses[index];
   if (!course) return;
 
   _currentIndex = index;
-  _editingIndex = null; // close any open edit when switching courses
+  _editingIndex = null;
   resultsEl.classList.add('show');
 
   legendEl.classList.remove('animate');
   void legendEl.offsetWidth; // force reflow so slide-in re-fires
-
   rebuildChart(index);
-
   legendEl.classList.add('animate');
 }
 
@@ -238,7 +220,6 @@ export function updateDropdown() {
   dropdownEl.value = courses.length - 1;
 }
 
-// ── Static listeners ────────────────────────────────────────────────────────
 dropdownEl.addEventListener('change', e => {
   renderChart(parseInt(e.target.value));
 });

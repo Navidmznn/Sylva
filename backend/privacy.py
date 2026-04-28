@@ -1,10 +1,6 @@
-"""
-privacy.py — privacy policy content + minimal renderer.
-
-Honest and specific to this project. If any of these claims stop being
-true (e.g. you swap Ollama for an external API, or start retaining raw
-PDFs), update this file as part of the change — not in a follow-up.
-"""
+"""Privacy policy text + a minimal markdown renderer. Keep this in sync with
+the actual data flow — if you swap Ollama for an external API or start
+retaining raw PDFs, update the policy in the same change."""
 from __future__ import annotations
 
 PRIVACY_MARKDOWN = """\
@@ -98,12 +94,9 @@ contact details here. If you are running it for yourself, that's you.
 
 
 def render_privacy_html() -> str:
-    """Return the privacy policy as a self-contained HTML page.
-
-    Deliberately tiny — we don't pull in a markdown library for one page.
-    Handles the subset of markdown actually used above: H1/H2, paragraphs,
-    bullet lists, bold (`**`), inline code (backticks).
-    """
+    """Render the policy as a self-contained HTML page. Tiny inline parser —
+    no markdown library for one page. Handles H1/H2, paragraphs, bullets,
+    bold (**), and inline code (backticks)."""
     import html
     import re
 

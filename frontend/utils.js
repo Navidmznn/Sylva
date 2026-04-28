@@ -1,9 +1,6 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   UTILS — cross-cutting helpers used by multiple modules
-═══════════════════════════════════════════════════════════════════════════ */
+// Cross-cutting helpers used by multiple modules.
 
-// HTML-escape any string before innerHTML interpolation. Used at every render
-// site that builds markup with template literals; LLM-derived strings (course
+// HTML-escape before innerHTML interpolation. LLM-derived strings (course
 // titles, instructor names, etc.) are untrusted and must pass through this.
 export function escapeHtml(str) {
   return String(str)
@@ -14,8 +11,8 @@ export function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-// Per-course color generation using golden-angle HSL rotation.
-// Two adjacent courses always get visually distinct hues regardless of count.
+// Per-course color via golden-angle HSL rotation — adjacent courses always
+// get visually distinct hues regardless of count.
 export function getCourseColors(index) {
   const hue = Math.round((index * 137.508) % 360);
   return {
@@ -25,19 +22,19 @@ export function getCourseColors(index) {
 }
 
 // Multi-date assessment expander.
-// Assessments with a `dates` array are logically one item (one pie slice, one
-// weight entry) but need to appear as individual occurrences on the calendar,
-// in the assessment list, and in the grade calculator.
+// Assessments with a `dates` array are logically one item (one pie slice,
+// one weight entry) but should appear as individual occurrences on the
+// calendar, in the assessment list, and in the grade calculator.
 //
 // Returns a flat array where every multi-date assessment is replaced by N
 // copies, each carrying:
 //   _expandedIndex   – 1-based position label  ("Tutorial 1", "Tutorial 2", …)
-//   _expandedTotal   – total sibling count      (used for labelling)
-//   _expandedWeight  – weight_percent / N       (for grade-calc purposes)
-//   _parentTitle     – original assessment title (for grouping)
+//   _expandedTotal   – total sibling count
+//   _expandedWeight  – weight_percent / N      (for grade-calc purposes)
+//   _parentTitle     – original title          (for grouping)
 //
-// Single-date and range assessments are passed through unchanged (their
-// _expandedIndex stays undefined so callers can detect un-expanded items).
+// Single-date and range assessments pass through unchanged; their
+// _expandedIndex stays undefined so callers can detect un-expanded items.
 export function expandAssessments(assessments) {
   const out = [];
   for (const a of assessments) {
@@ -51,7 +48,7 @@ export function expandAssessments(assessments) {
           ...a,
           title: `${a.title} ${i + 1}`,
           date: d,
-          dates: null,           // treat as single-date from here on
+          dates: null,
           weight_percent: perWeight,
           _parentTitle: a.title,
           _expandedIndex: i + 1,
@@ -66,38 +63,31 @@ export function expandAssessments(assessments) {
   return out;
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   Misc helpers
-   ────────────────────────────────────────────────────────────────────────── */
-
-// Stable ID generator. Used by state.js to tag courses + assessments at the
-// point of ingestion so downstream lookups don't rely on titles (which mutate).
-// Crypto.randomUUID is available everywhere we ship; the fallback exists only
-// to keep this importable in the rare non-secure context (file://).
+// Stable id. Used by state.js to tag courses + assessments at ingestion so
+// downstream lookups don't rely on titles (which mutate). The fallback only
+// matters in non-secure contexts (file://) where crypto.randomUUID is absent.
 export function uid() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return 'id-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-// Add `n` whole days to a YYYY-MM-DD string, returning the same format.
-// Used for FullCalendar's exclusive-end semantics (an event that visually ends
-// on Friday must be passed end=Saturday).
+// Add `n` whole days to a YYYY-MM-DD string. FullCalendar's all-day events
+// have exclusive `end`, so an event ending visually on Friday must pass
+// end=Saturday.
 export function addDays(yyyyMmDd, n) {
   if (!yyyyMmDd || typeof yyyyMmDd !== 'string') return yyyyMmDd;
-  // Construct as UTC noon to dodge DST/off-by-one timezone issues at midnight.
+  // UTC noon dodges DST/off-by-one timezone issues at midnight.
   const d = new Date(yyyyMmDd + 'T12:00:00Z');
   if (isNaN(d.getTime())) return yyyyMmDd;
   d.setUTCDate(d.getUTCDate() + n);
   return d.toISOString().slice(0, 10);
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   Toast — non-blocking notification
-   ──────────────────────────────────────────────────────────────────────────
-   Single global host appended to <body> on first call. Each toast is its own
-   element so multiple can stack. Auto-dismiss after `duration` ms; click to
-   dismiss early. Fully keyboard/AT-friendly via role="status" + aria-live.
-   ────────────────────────────────────────────────────────────────────────── */
+
+// Toast — non-blocking notification. One global host appended on first
+// call. Each toast is its own element so they can stack. Auto-dismiss
+// after `duration` ms; click to dismiss early. role="status" + aria-live
+// for AT compatibility.
 
 let _toastHost = null;
 
@@ -133,7 +123,7 @@ export function showToast(message, kind = 'info', duration) {
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
   `;
-  // Use textContent for the message — message strings may include user/LLM input.
+  // textContent — message strings may include user/LLM input.
   el.querySelector('.toast-msg').textContent = String(message);
 
   let dismissed = false;
@@ -142,27 +132,23 @@ export function showToast(message, kind = 'info', duration) {
     dismissed = true;
     el.classList.add('toast--leaving');
     el.addEventListener('transitionend', () => el.remove(), { once: true });
-    // Safety net in case the transitionend never fires.
+    // Safety net if transitionend never fires.
     setTimeout(() => el.remove(), 400);
   };
 
   el.querySelector('.toast-close').addEventListener('click', dismiss);
 
   host.appendChild(el);
-  // Trigger enter transition on next frame.
   requestAnimationFrame(() => el.classList.add('toast--enter'));
 
   setTimeout(dismiss, ms);
   return dismiss;
 }
 
-/* ─────────────────────────────────────────────────────────────────────────────
-   Confirm — promise-returning modal dialog
-   ──────────────────────────────────────────────────────────────────────────
-   Replacement for window.confirm(). Returns Promise<boolean>. Closes on
-   confirm-click (true), cancel-click / Escape / overlay-click (false).
-   Only one confirm is open at a time — re-entrant calls reject the previous.
-   ────────────────────────────────────────────────────────────────────────── */
+
+// Confirm — promise-returning replacement for window.confirm(). Resolves
+// true on confirm, false on cancel / Escape / overlay-click. Only one
+// confirm at a time; re-entrant calls reject the previous.
 
 let _activeConfirmReject = null;
 
@@ -173,7 +159,6 @@ export function showConfirm({
   cancelLabel = 'Cancel',
   danger = false,
 } = {}) {
-  // Cancel any in-flight confirm — UI never shows two at once.
   if (_activeConfirmReject) _activeConfirmReject();
 
   return new Promise(resolve => {

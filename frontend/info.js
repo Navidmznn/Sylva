@@ -1,6 +1,4 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   COURSE INFO — renders the course information card and its dropdown
-═══════════════════════════════════════════════════════════════════════════ */
+// Course info card and its course-select dropdown.
 
 import { courses } from './state.js';
 import { escapeHtml } from './utils.js';
@@ -108,7 +106,6 @@ export function updateInfoDropdown() {
   dropdownEl.value = courses.length - 1;
 }
 
-// ── Static listeners ────────────────────────────────────────────────────────
 dropdownEl.addEventListener('change', e => {
   renderCourseInfo(parseInt(e.target.value));
 });

@@ -1,13 +1,4 @@
-"""
-db_models.py — SQLAlchemy ORM models.
-
-Tables
-──────
-* users        — one per email. Created lazily on first /auth/login.
-* magic_tokens — single-use sign-in tokens; only the hash is stored.
-* sessions     — server-side session rows; only the hash is stored.
-* syllabi      — one per parsed upload, FK to users (NOT NULL after 0002).
-"""
+"""SQLAlchemy ORM models. Tables: users, magic_tokens, sessions, syllabi."""
 from __future__ import annotations
 
 import uuid
@@ -28,9 +19,9 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    # `email` is the user-visible form. `email_normalized` is the lookup key
-    # (stripped + lowercased) — split into two columns so we can show users
-    # the casing they typed while still deduping on case-insensitive equality.
+    # email is the user-visible form; email_normalized is the lookup key
+    # (stripped + lowercased). Two columns so we can show users the casing
+    # they typed while deduping case-insensitively.
     email:            Mapped[str] = mapped_column(String(320), nullable=False)
     email_normalized: Mapped[str] = mapped_column(
         String(320), nullable=False, unique=True, index=True
@@ -51,8 +42,8 @@ class User(Base):
 
 
 class MagicToken(Base):
-    """One-time sign-in token. token_hash = HMAC-SHA-256(raw, SESSION_SECRET).
-    Marked `used_at` on first redemption — single-use is enforced by checking
+    """Single-use sign-in token. token_hash = HMAC-SHA-256(raw, SESSION_SECRET).
+    used_at is set on first redemption; single-use is enforced by checking
     used_at IS NULL during validation."""
 
     __tablename__ = "magic_tokens"
@@ -105,8 +96,7 @@ class Syllabus(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    # Now NOT NULL — every syllabus belongs to a user. Migration 0002 deletes
-    # any orphan rows from the pre-auth era before tightening this column.
+    # NOT NULL since migration 0002 — pre-auth orphan rows were deleted.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )

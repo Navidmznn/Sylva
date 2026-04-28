@@ -378,6 +378,12 @@ curl -F "file=@./sample.pdf" \
   significantly.
 - **No test suite yet.** Manual testing checklist is in
   [`docs/DEVELOPMENT.md`](docs/DEVELOPMENT.md).
+- **Rate limiting assumes direct client IPs.** `slowapi.util.get_remote_address`
+  reads `request.client.host` — the immediate TCP peer. In dev that's the user.
+  Behind nginx/Cloudflare in prod, that's the proxy, and all users share one
+  rate-limit bucket. Before deploying, swap the key function for one that
+  reads `X-Forwarded-For` only when the request comes from a trusted proxy
+  IP, or run uvicorn with `--proxy-headers --forwarded-allow-ips=...`.
 - **Magic links require console access in dev.** With `EMAIL_MODE=console`,
   the sign-in link prints to the uvicorn terminal. Production needs SMTP
   credentials.

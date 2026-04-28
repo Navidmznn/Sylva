@@ -11,7 +11,7 @@ from constants import (
 )
 
 
-# Safely matches ```json ... ``` or ``` ... ``` in a single pass
+# Matches ```json ... ``` or ``` ... ``` in a single pass.
 _CODE_FENCE_RE = re.compile(
     r"^\s*```(?:json)?\s*(.*?)\s*```\s*$",
     re.IGNORECASE | re.DOTALL
@@ -19,11 +19,9 @@ _CODE_FENCE_RE = re.compile(
 
 
 def neutralize_prompt_delimiters(text: str) -> str:
-    """
-    Prevent PDF content from closing or reopening our trusted wrapper tags.
+    """Stop PDF content from closing or reopening the trusted wrapper tags.
     A PDF containing </untrusted_syllabus_text> could otherwise escape the
-    delimiter boundary and inject text into the trusted portion of the prompt.
-    """
+    delimiter boundary and inject text into the trusted portion of the prompt."""
     return (
         text
         .replace("<untrusted_syllabus_text>",  "[removed opening delimiter]")
@@ -32,12 +30,8 @@ def neutralize_prompt_delimiters(text: str) -> str:
 
 
 def strip_code_fences(raw: str) -> str:
-    """
-    Ollama with format='json' usually returns bare JSON, but some models wrap
-    output in ```json fences. The old split-based approach returned an empty
-    string when the content was between the first and last fence.
-    This regex approach handles all fence variants correctly.
-    """
+    """Ollama with format='json' usually returns bare JSON, but some models
+    wrap output in ```json fences. Regex match handles all fence variants."""
     raw = raw.strip()
     match = _CODE_FENCE_RE.match(raw)
     if match:
@@ -53,7 +47,7 @@ def build_syllabus_prompt(extracted_text: str) -> str:
 async def word_parser(extracted_text: str, context_size: int) -> str:
     prompt = build_syllabus_prompt(extracted_text)
 
-    # Use OLLAMA_TIMEOUT from constants — timeout=None allowed Ollama to hang forever
+    # Explicit timeout — None lets Ollama hang forever on a stuck model.
     timeout = httpx.Timeout(
         timeout=float(OLLAMA_TIMEOUT),
         connect=10.0,
@@ -71,7 +65,7 @@ async def word_parser(extracted_text: str, context_size: int) -> str:
                 "stream": False,
                 "options": {
                     "num_ctx": context_size,
-                    "temperature": 0,   # extraction task — consistency over creativity
+                    "temperature": 0,   # extraction — consistency over creativity
                 },
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},

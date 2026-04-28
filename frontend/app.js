@@ -1,11 +1,6 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   SYLLABUS APP — entry point
-   Owns: upload flow, nav highlighting, mobile hamburger, post-upload
-   orchestration of the section render functions.
-   Section logic lives in: info.js, chart.js, assessments.js, calendar.js,
-   gradeCalc.js. Shared state lives in state.js. Cross-cutting helpers in
-   utils.js.
-═══════════════════════════════════════════════════════════════════════════ */
+// Entry point. Owns upload flow, nav, mobile menu, and post-upload render
+// orchestration. Section logic lives in info.js / chart.js / assessments.js
+// / calendar.js / gradeCalc.js. Shared state in state.js, helpers in utils.js.
 
 import { addCourses, courses, removeCourse } from './state.js';
 import { renderCourseInfo, updateInfoDropdown } from './info.js';
@@ -21,12 +16,9 @@ import {
 import { renderGradeCalc } from './gradeCalc.js';
 import { showToast, showConfirm } from './utils.js';
 
-// ── Backend base URL + credentialed fetch helper ─────────────────────────────
-// Every call to the backend must include credentials (the session cookie).
-// `apiFetch` wraps fetch() to set credentials: 'include' uniformly, throws on
-// non-2xx with the server's `detail` message, and returns parsed JSON on 2xx
-// (or null for 204). Pass `parseJson: false` for endpoints with non-JSON
-// responses (none currently used here, but keeps the door open).
+// All backend calls go through apiFetch so the session cookie always rides
+// along (credentials: 'include'). Throws on non-2xx with the server's
+// `detail` message; returns parsed JSON on 2xx, null on 204.
 const API_BASE = 'http://localhost:8000';
 
 async function apiFetch(path, { method = 'GET', body, headers, parseJson = true } = {}) {
@@ -59,26 +51,28 @@ const fileInput    = document.querySelector('.file-input');
 const loadingModal = document.getElementById('loading-modal');
 const clearDataBtn = document.getElementById('clear-data-btn');
 
-// ── localStorage persistence ─────────────────────────────────────────────────
-// localStorage caches the parsed-syllabus JSON for instant render on reload.
-// Server-side syllabi are managed via /syllabi (list) and DELETE /syllabi/{id}
-// (single) and DELETE /account (everything). Clearing localStorage does not
-// touch the backend.
+// localStorage caches parsed syllabi for instant render on reload — but only
+// for signed-in users. Guests are in-memory only: data lives until the tab
+// closes. Two reasons: (1) prevents prior-user data from showing up to a
+// guest on a shared computer, (2) keeps the privacy story crisp ("sign in
+// to save your data"). The backend remains source of truth via /syllabi.
 const LS_KEY        = 'syllabusApp_courses';
-const LS_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const LS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function persistCourses() {
+  if (!authState.user) return;  // Guest mode — in-memory only.
   try {
     localStorage.setItem(LS_KEY, JSON.stringify({
       savedAt: Date.now(),
       courses,
     }));
   } catch {
-    // Storage quota exceeded or private-browsing restriction — non-fatal.
+    // Quota or private-browsing — non-fatal.
   }
 }
 
 function loadPersistedCourses() {
+  if (!authState.user) return [];  // Guests don't read the cache.
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return [];
@@ -98,9 +92,14 @@ function clearPersistedCourses() {
   localStorage.removeItem(LS_KEY);
 }
 
-// ── Shared render orchestration ──────────────────────────────────────────────
 function renderAllSections() {
   const lastIdx = courses.length - 1;
+
+  // Collapse the hero upload card into a compact bar once at least one
+  // syllabus has been parsed. CSS handles the actual transition; we just
+  // own the truthy/falsy of "is there anything to show".
+  const uploadCard = document.querySelector('.upload-card');
+  if (uploadCard) uploadCard.classList.toggle('is-minimized', courses.length > 0);
 
   updateDropdown();
   updateInfoDropdown();
@@ -118,24 +117,17 @@ function renderAllSections() {
   }
 }
 
-// ── Restore saved data on page load ─────────────────────────────────────────
-// Strategy:
-//   Logged in  → fetch GET /syllabi from the backend (source of truth).
-//                Each syllabus row's `data.courses` array is merged in.
-//                Also re-writes localStorage so subsequent fast-reloads
-//                don't need another round-trip.
-//   Logged out → fall back to localStorage (guest / offline mode).
+// Logged in → /syllabi is the source of truth, localStorage is a cache.
+// Guest    → no persistence at all. Wipe any leftover cache from a prior
+//            session so a different person on the same browser sees nothing.
 async function initFromStorage() {
   if (authState.user) {
     try {
       const syllabi = await apiFetch('/syllabi');
       if (!Array.isArray(syllabi) || syllabi.length === 0) return;
 
-      // Each /syllabi row has shape { id, filename, data, created_at }.
-      // `data` is the full parsed syllabus object; `data.courses` is the
-      // array of courses that addCourses() expects.
-      // Tag each course with the backend syllabus row it came from.
-      // The delete handler uses this to update or remove the right row.
+      // Tag each course with its backend syllabus row id so the per-course
+      // delete handler knows which row to PATCH or DELETE.
       const allCourses = syllabi.flatMap(s =>
         (s.data?.courses ?? []).map(c => ({ ...c, _syllabusId: s.id }))
       );
@@ -145,27 +137,28 @@ async function initFromStorage() {
       renderAllSections();
       clearDataBtn.style.display = 'inline-flex';
 
-      // Warm localStorage so a hard-reload while still logged in is instant.
       persistCourses();
       console.log(`[Syllabus App] Restored ${allCourses.length} course(s) from backend.`);
       return;
     } catch (e) {
-      // Network error or 401 — fall through to localStorage.
       console.warn('[Syllabus App] Backend restore failed, falling back to localStorage:', e.message);
     }
+
+    const saved = loadPersistedCourses();
+    if (saved.length === 0) return;
+    await addCourses(saved);
+    renderAllSections();
+    clearDataBtn.style.display = 'inline-flex';
+    console.log(`[Syllabus App] Restored ${saved.length} course(s) from localStorage.`);
+    return;
   }
 
-  // Logged-out path (or backend unreachable).
-  const saved = loadPersistedCourses();
-  if (saved.length === 0) return;
-  await addCourses(saved);
-  renderAllSections();
-  clearDataBtn.style.display = 'inline-flex';
-  console.log(`[Syllabus App] Restored ${saved.length} course(s) from localStorage.`);
+  // Guest path — nuke any leftover cache. Invariant after this line:
+  // localStorage[LS_KEY] is non-empty ⇔ the current user is signed in.
+  clearPersistedCourses();
 }
 
-// ── Per-course delete ────────────────────────────────────────────────────────
-// Deletes whichever course is currently displayed in the chart card.
+// Per-course delete — operates on whichever course the chart card is showing.
 const deleteCourseBtn = document.getElementById('delete-course-btn');
 deleteCourseBtn.addEventListener('click', async () => {
   const idx = getCurrentChartIndex();
@@ -186,22 +179,19 @@ deleteCourseBtn.addEventListener('click', async () => {
 
   removeCourse(idx);
 
-  // Sync deletion to the backend when logged in.
-  // `target._syllabusId` is set during backend hydration (initFromStorage).
-  // If the course came from localStorage only it won't be set — skip silently.
+  // Sync to backend if logged in. _syllabusId is set during backend hydration;
+  // courses loaded from localStorage only won't have it.
   if (authState.user && target._syllabusId) {
     const syllabusId = target._syllabusId;
-    // Check how many remaining courses still belong to this syllabus row.
     const siblingsLeft = courses.filter(c => c._syllabusId === syllabusId);
 
     if (siblingsLeft.length === 0) {
-      // No courses left from this PDF — delete the whole Syllabus row.
+      // Last course from this PDF — drop the whole row.
       apiFetch(`/syllabi/${syllabusId}`, { method: 'DELETE' }).catch(e => {
         console.warn('[Syllabus App] Backend delete failed:', e.message);
       });
     } else {
-      // Other courses from the same PDF survive — patch the row to remove
-      // just this one from its data.courses array.
+      // PATCH the row to remove just this course from data.courses.
       const updatedCourses = siblingsLeft.map(({ _syllabusId: _, ...c }) => c);
       apiFetch(`/syllabi/${syllabusId}`, {
         method: 'PATCH',
@@ -212,7 +202,6 @@ deleteCourseBtn.addEventListener('click', async () => {
     }
   }
 
-  // If that was the last course, the app reverts to its empty state.
   if (courses.length === 0) {
     clearPersistedCourses();
     window.location.reload();
@@ -224,10 +213,8 @@ deleteCourseBtn.addEventListener('click', async () => {
   showToast(`Deleted ${label}.`, 'success');
 });
 
-// ── Clear browser data ──────────────────────────────────────────────────────
-// Wipes the localStorage cache only. Backend syllabi are managed via the
-// per-syllabus delete UI and DELETE /account; this button does not touch
-// the server.
+// Wipes the localStorage cache only. Backend deletion is handled by the
+// per-syllabus delete UI and DELETE /account.
 clearDataBtn.addEventListener('click', async () => {
   const ok = await showConfirm({
     title: 'Clear browser cache?',
@@ -242,13 +229,9 @@ clearDataBtn.addEventListener('click', async () => {
   window.location.reload();
 });
 
-// ── Upload flow ─────────────────────────────────────────────────────────────
+// Upload flow
+
 uploadBtn.addEventListener('click', () => {
-  if (!authState.user) {
-    showToast('Please sign in first to upload a syllabus.', 'warning');
-    document.getElementById('auth-email')?.focus();
-    return;
-  }
   fileInput.click();
 });
 
@@ -267,9 +250,8 @@ fileInput.addEventListener('change', async () => {
   uploadBtn.disabled = true;
   loadingModal.classList.add('show');
 
-  // Hand the cosmetic-animation bar over to JS-driven mode. The CSS class
-  // tells style.css to disable the infinite-loop keyframe animation so we can
-  // set width: directly from real progress reports.
+  // Switch the loading bar from the cosmetic CSS keyframe to JS-driven mode.
+  // .is-driven disables the keyframe so we can set width: directly.
   const loadingBarFill = document.getElementById('loading-bar-fill');
   const loadingSubtitle = document.getElementById('loading-subtitle');
   loadingBarFill.classList.add('is-driven');
@@ -280,22 +262,24 @@ fileInput.addEventListener('change', async () => {
     const formData = new FormData();
     formData.append('file', file);
 
-    // 1. Validate-and-enqueue. Returns ~immediately; heavy work runs in the
-    //    worker. apiFetch sends credentials so the server identifies the user.
+    // 1. Validate-and-enqueue. Returns immediately; heavy work runs in the worker.
     let enqueue;
     try {
       enqueue = await apiFetch('/upload', { method: 'POST', body: formData });
     } catch (e) {
       if (e.status === 401) {
-        // Session expired since the page loaded — refresh widget and bail.
         await refreshAuth();
-        throw new Error('Your session expired. Please sign in again.');
+        throw new Error(
+          authState.user
+            ? 'Your session expired. Please sign in again.'
+            : 'Upload failed. Please try again.'
+        );
       }
       throw e;
     }
     if (!enqueue?.job_id) throw new Error('Server did not return a job id.');
 
-    // 2. Poll /jobs/<id> every 2 seconds until terminal state.
+    // 2. Poll until terminal state.
     const result = await pollJobUntilDone(enqueue.job_id, {
       intervalMs: 2000,
       onProgress: (state) => {
@@ -310,16 +294,13 @@ fileInput.addEventListener('change', async () => {
       throw new Error('Job finished without a result payload.');
     }
 
-    console.log('[Syllabus App] Raw JSON from AI:', JSON.stringify(result.data, null, 2));
-
     const newCourses = result.data.courses;
     if (!newCourses || newCourses.length === 0) {
       showToast('No course data could be extracted from this PDF. Try a different syllabus.', 'warning');
       return;
     }
 
-    // Dedup hook: when an incoming course matches an existing one on
-    // (course_code, section_code, term), prompt the user to replace or skip.
+    // Dedup on (course_code, section_code, term) — prompt to replace or skip.
     const beforeCount = courses.length;
     await addCourses(newCourses, {
       onDuplicate: async (incoming) => {
@@ -336,7 +317,6 @@ fileInput.addEventListener('change', async () => {
     });
 
     if (courses.length === beforeCount) {
-      // Every incoming course was a duplicate the user chose to skip.
       showToast('Nothing added — duplicates skipped.', 'info');
       return;
     }
@@ -344,6 +324,15 @@ fileInput.addEventListener('change', async () => {
     persistCourses();
     renderAllSections();
     clearDataBtn.style.display = 'inline-flex';
+
+    // Guest-only: nudge once per session to upgrade to a saved account.
+    // sessionStorage so the same guest doesn't get nagged on every upload,
+    // but a fresh tab does see it again — the prompt is the whole point of
+    // guest mode existing.
+    if (!authState.user && !sessionStorage.getItem('syllabusApp_guestNudgeShown')) {
+      sessionStorage.setItem('syllabusApp_guestNudgeShown', '1');
+      showToast('Sign in to save your courses across sessions.', 'info');
+    }
 
     document.querySelectorAll('.nav-link').forEach(link => link.classList.remove('active'));
     document.querySelector('.nav-link[href="#course-info-section"]').classList.add('active');
@@ -354,9 +343,7 @@ fileInput.addEventListener('change', async () => {
     showToast(err.message || 'Something went wrong.', 'error');
   } finally {
     loadingModal.classList.remove('show');
-    // Hand the bar back to its cosmetic CSS-animation state so the next
-    // upload starts fresh. Removing the inline width lets the keyframe
-    // rule take over again.
+    // Hand the bar back to its cosmetic CSS-animation state for the next run.
     loadingBarFill.classList.remove('is-driven');
     loadingBarFill.style.width = '';
     if (loadingSubtitle) loadingSubtitle.textContent = 'This takes about a minute. Grab a coffee!';
@@ -366,16 +353,11 @@ fileInput.addEventListener('change', async () => {
   }
 });
 
-// ── Job polling ──────────────────────────────────────────────────────────────
-// Polls GET /jobs/<id> every `intervalMs` until status is 'complete' or
-// 'failed'. Resolves with `state.result` on completion; rejects with the
-// server's error message on failure.
-//
-// Defensive timing: we re-check the time after each await rather than relying
-// on setInterval, so a slow network turn doesn't pile up overlapping requests.
+// Polls /jobs/<id> until status is 'complete' or 'failed'. Re-checks the
+// clock after each await rather than using setInterval, so a slow turn
+// can't pile up overlapping requests.
 async function pollJobUntilDone(jobId, { intervalMs = 2000, onProgress } = {}) {
-  // Hard wall-clock ceiling. Worker has its own DOCLING_TIMEOUT_SECONDS;
-  // this is just so a runaway poll loop can't run forever in the browser.
+  // Browser-side timeout. The worker has its own; this is a runaway-loop guard.
   const HARD_TIMEOUT_MS = 15 * 60 * 1000;
   const started = Date.now();
 
@@ -403,22 +385,18 @@ async function pollJobUntilDone(jobId, { intervalMs = 2000, onProgress } = {}) {
   }
 }
 
-// ── Assessment-edit sync ──────────────────────────────────────────────────────
-// assessments.js dispatches this event after writing an edit back to `courses`.
-// We persist the update then surgically re-render the three views that reflect
-// assessment data — avoiding a full renderAllSections() which would reset the
-// chart/info course-select dropdowns to the last index.
+// assessments.js fires this after writing an edit. Surgically re-render the
+// three views that reflect assessment data — avoids resetting the chart/info
+// dropdown indices that renderAllSections() would.
 window.addEventListener('syllabusapp:assessmentupdated', () => {
   persistCourses();
   renderAssessmentList();
-  // Clamp in case a course was removed since the chart last rendered.
   const idx = Math.min(getCurrentChartIndex(), courses.length - 1);
   if (idx >= 0) renderChart(idx);
   refreshCalendarEvents();
   renderGradeCalc();
 });
 
-// ── Top-nav active-link tracking ────────────────────────────────────────────
 document.querySelectorAll('.nav-link').forEach(link => {
   link.addEventListener('click', function () {
     document.querySelectorAll('.nav-link').forEach(l => l.classList.remove('active'));
@@ -426,20 +404,13 @@ document.querySelectorAll('.nav-link').forEach(link => {
   });
 });
 
-// ── Hamburger menu (mobile) ─────────────────────────────────────────────────
-// Toggles a single class — all visual styling lives in style.css under
-// `.nav-links--mobile-open` (dark surface, violet-dusk hover/active accents).
 document.querySelector('.hamburger').addEventListener('click', () => {
   document.querySelector('.nav-links').classList.toggle('nav-links--mobile-open');
 });
 
-// ═══════════════════════════════════════════════════════════════════════════
-// AUTH — magic-link login UI in the header
-// ═══════════════════════════════════════════════════════════════════════════
-// Tiny module-level state. Other handlers consult `authState.user` to gate
-// actions (e.g. the upload button). We never read or write the session cookie
-// from JS — it's httpOnly. We only ever ask the backend "who am I?" via
-// GET /auth/me.
+
+// Auth — magic-link login UI in the header. The session cookie is httpOnly,
+// so JS never reads or writes it; we only ever ask /auth/me "who am I?".
 
 const authState = { user: null };
 
@@ -500,12 +471,11 @@ authLogoutBtn.addEventListener('click', async () => {
   try {
     await apiFetch('/auth/logout', { method: 'POST' });
   } catch {
-    // Logout is best-effort. The cookie clear is server-driven; we still
-    // refresh local state below regardless.
+    // Best-effort. The cookie clear is server-driven; we refresh local state below regardless.
   }
   authState.user = null;
   renderAuth();
-  // Wipe localStorage too — the cached courses belonged to the prior user.
+  // Wipe localStorage — cached courses belonged to the prior user.
   clearPersistedCourses();
   showToast('Logged out.', 'info');
   // Reload to reset every other module's in-memory state cleanly.
@@ -521,7 +491,7 @@ authDeleteBtn.addEventListener('click', async () => {
     danger: true,
   });
   if (!ok) return;
-  // Second confirmation — destructive + irreversible.
+  // Two confirmations because this is destructive and irreversible.
   const reallyOk = await showConfirm({
     title: 'Are you sure?',
     message: 'Last chance — this is permanent.',
@@ -543,16 +513,15 @@ authDeleteBtn.addEventListener('click', async () => {
   setTimeout(() => window.location.reload(), 600);
 });
 
-// ── If we just landed from a magic-link redirect, surface a success toast ──
+// Surface a toast when we land back from a magic-link redirect, then strip
+// the query param so a refresh doesn't re-fire it.
 if (new URLSearchParams(window.location.search).get('logged_in') === '1') {
   showToast('Signed in.', 'success');
-  // Clean the query string so refreshing doesn't re-fire the toast.
   const url = new URL(window.location.href);
   url.searchParams.delete('logged_in');
   window.history.replaceState({}, '', url.toString());
 }
 
-// ── Init ─────────────────────────────────────────────────────────────────────
 (async () => {
   await refreshAuth();
   await initFromStorage();

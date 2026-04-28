@@ -1,6 +1,4 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   GRADE CALCULATOR — score input panel + per-grade target panel
-═══════════════════════════════════════════════════════════════════════════ */
+// Grade calculator — score input panel + per-grade target panel.
 
 import { courses } from './state.js';
 import { escapeHtml, expandAssessments } from './utils.js';
@@ -15,14 +13,10 @@ let courseIndex = 0;
 let scaleKey    = 'letter-plus';
 let _mounted    = false;
 
-// Persistent score inputs across re-renders, keyed by stable assessment id.
-// Stable id format: `${assessment.id}::${expandedIdx}` where:
-//   assessment.id  – assigned in state.js at addCourses time (id-stable across
-//                    title/weight edits AND across course-list reorderings or
-//                    deletions, since it's not positional)
-//   expandedIdx    – 0 for non-expanded items, 1..N for multi-date occurrences
-// Values are { score, outOf } as the raw input strings (so a half-typed
-// "9" doesn't get re-formatted to "9" mid-keystroke).
+// Persistent score inputs keyed by `${assessment.id}::${expandedIdx}`.
+// Stable across title/weight edits and across course-list reorderings or
+// deletions, since assessment.id is positional-independent. Values are
+// the raw input strings so a half-typed "9" doesn't reformat mid-keystroke.
 const scoreInputs = new Map();
 
 function makeAssessmentId(a) {
@@ -148,9 +142,8 @@ export function renderGradeCalc() {
     `<option value="${i}">${escapeHtml(c.course_code || c.course_title || 'Course ' + (i + 1))}</option>`
   ).join('');
 
-  // Only reset on first mount or when the previously-selected index is no
-  // longer valid (e.g. courses were cleared and reloaded with fewer entries).
-  // Otherwise the user's selection is preserved across re-renders.
+  // Reset only on first mount or when the previous index is no longer
+  // valid; otherwise preserve the user's selection across re-renders.
   if (!_mounted || courseIndex >= courses.length || courseIndex < 0) {
     courseIndex = courses.length - 1;
     _mounted = true;
@@ -164,7 +157,7 @@ function renderGcBody() {
   const course = courses[courseIndex];
   if (!course) return;
   // Expand multi-date assessments so each occurrence has its own input row
-  // and its own (proportionally divided) weight.
+  // and a proportionally divided weight.
   const originals   = course.assessments || [];
   const assessments = expandAssessments(originals);
   const ids         = assessments.map(a => makeAssessmentId(a));
@@ -212,7 +205,7 @@ function renderGcBody() {
     const preview = document.getElementById(`gc-preview-${i}`);
     const id      = ids[i];
 
-    // Restore previously-entered values for this assessment (if any).
+    // Restore previously-entered values.
     const saved = scoreInputs.get(id);
     if (saved) {
       if (saved.score !== undefined) scoreEl.value = saved.score;
@@ -220,8 +213,8 @@ function renderGcBody() {
     }
 
     function syncPreview() {
-      // Persist current raw values before recomputing — Map is the source of
-      // truth across re-renders triggered by edits in other panels.
+      // Persist raw values before recomputing — Map is the source of truth
+      // across re-renders triggered by edits in other panels.
       scoreInputs.set(id, { score: scoreEl.value, outOf: outofEl.value });
 
       const s = parseFloat(scoreEl.value);
@@ -237,7 +230,6 @@ function renderGcBody() {
       refreshGcResults(assessments);
     }
 
-    // Sync the preview once on mount so restored values render correctly.
     if (saved) syncPreview();
 
     scoreEl.addEventListener('input', syncPreview);
@@ -250,8 +242,8 @@ function renderGcBody() {
 function refreshGcResults(assessments) {
   const course = courses[courseIndex];
   if (!course) return;
-  // Accept a pre-expanded list (from renderGcBody) or build one on the fly
-  // when called from the scale/course selectors without an explicit list.
+  // Accept a pre-expanded list (from renderGcBody) or build one when called
+  // from the scale/course selectors without an explicit list.
   if (!assessments) assessments = expandAssessments(course.assessments || []);
 
   const scores = [];
@@ -370,7 +362,6 @@ function refreshGcResults(assessments) {
   `;
 }
 
-// ── Static listeners ────────────────────────────────────────────────────────
 courseSelectEl.addEventListener('change', e => {
   courseIndex = parseInt(e.target.value);
   renderGcBody();

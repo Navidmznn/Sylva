@@ -3,7 +3,7 @@ from pydantic import BaseModel, model_validator
 from typing import Any, List, Optional
 
 
-# YYYY-MM-DD only — what the system prompt asks the LLM to emit.
+# YYYY-MM-DD only — what the system prompt tells the LLM to emit.
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
 
@@ -12,11 +12,9 @@ def _is_date_shaped(s: Any) -> bool:
 
 
 def _split_csv_dates(s: Any) -> Optional[List[str]]:
-    """
-    If `s` is a string of comma-separated YYYY-MM-DD dates, return the parsed
-    list. Otherwise return None — we never split arbitrary CSV (a title like
-    "Final exam, in person" must not become a list of "dates").
-    """
+    """If `s` is a string of comma-separated YYYY-MM-DD dates, return the parsed
+    list. Otherwise None — we never split arbitrary CSV (a title like
+    "Final exam, in person" must not become a list of dates)."""
     if not isinstance(s, str):
         return None
     parts = [p.strip() for p in s.split(",") if p.strip()]
@@ -36,9 +34,9 @@ class ClassMeeting(BaseModel):
 class Assessment(BaseModel):
     title: Optional[str] = None
     weight_percent: Optional[float] = None
-    date: Optional[str] = None        # single due date, format YYYY-MM-DD
+    date: Optional[str] = None        # single due date, YYYY-MM-DD
     dates: Optional[List[str]] = None
-    start: Optional[str] = None       # for range-based assessments
+    start: Optional[str] = None       # range start
     end: Optional[str] = None
     time: Optional[str] = None        # e.g. "11:59 PM"
     confidence: Optional[float] = None
@@ -46,25 +44,21 @@ class Assessment(BaseModel):
     @model_validator(mode="before")
     @classmethod
     def normalize_date_fields(cls, data: Any) -> Any:
-        """
-        Enforce mutual exclusivity of {date}, {dates}, {start, end}.
+        """Enforce mutual exclusivity of {date}, {dates}, {start, end}.
 
-        The system prompt asks the LLM to emit exactly one of these patterns per
-        assessment, but a local 8B model violates this regularly. Rather than
-        rejecting the whole object (and losing the assessment entirely), we
-        coerce the most common LLM mistakes:
+        The system prompt asks for exactly one pattern per assessment, but a
+        local 8B model violates this regularly. Rather than rejecting the
+        whole object (and losing the assessment entirely), we coerce the
+        common LLM mistakes:
+          - date as CSV string of dates → moved to dates
+          - date as a list              → moved to dates, or kept if len=1
+          - start as CSV of dates       → moved to dates, range cleared
+          - dates with one element      → moved to date
+          - dates empty / whitespace    → cleared
+          - multiple patterns set       → resolved by priority below
 
-          - `date`  arrived as a CSV string of dates  → moved to `dates`
-          - `date`  arrived as a list                 → moved to `dates`, or kept if len=1
-          - `start` arrived as a CSV string of dates  → moved to `dates`, range cleared
-          - `dates` containing a single element       → moved to `date`
-          - `dates` empty/whitespace                  → cleared
-          - multiple patterns set at once             → resolved by priority
-
-        Priority when multiple patterns are populated:
-          dates (multi)  >  date  >  range
-        Rationale: a list of dates is the most specific signal the LLM can give;
-        a single date is more specific than a range; range is the fallback.
+        Priority: dates (multi) > date > range. A list is the most specific
+        signal; a single date beats a range; range is the fallback.
         """
         if not isinstance(data, dict):
             return data
@@ -74,7 +68,7 @@ class Assessment(BaseModel):
         start = data.get("start")
         end = data.get("end")
 
-        # ── `date` arrived as a list ────────────────────────────────────────
+        # date arrived as a list
         if isinstance(date, list):
             cleaned = [d for d in date if isinstance(d, str) and d.strip()]
             if len(cleaned) > 1:
@@ -86,7 +80,7 @@ class Assessment(BaseModel):
             else:
                 date = None
 
-        # ── `date` arrived as a CSV of dates ────────────────────────────────
+        # date arrived as a CSV of dates
         if isinstance(date, str):
             split = _split_csv_dates(date)
             if split:
@@ -94,7 +88,7 @@ class Assessment(BaseModel):
                     dates = split
                 date = None
 
-        # ── `start` arrived as a CSV of dates (the prompt's named footgun) ──
+        # start arrived as a CSV of dates (the prompt's named footgun)
         if isinstance(start, str):
             split = _split_csv_dates(start)
             if split:
@@ -103,7 +97,7 @@ class Assessment(BaseModel):
                 start = None
                 end = None
 
-        # ── Normalize `dates` list ──────────────────────────────────────────
+        # Normalize dates list
         if isinstance(dates, list):
             dates = [d.strip() for d in dates if isinstance(d, str) and d.strip()]
             if not dates:
@@ -113,7 +107,7 @@ class Assessment(BaseModel):
                     date = dates[0]
                 dates = None
 
-        # ── Resolve mutual exclusivity ──────────────────────────────────────
+        # Resolve mutual exclusivity
         has_dates = isinstance(dates, list) and len(dates) > 1
         has_date = bool(date)
 

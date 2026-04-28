@@ -2,6 +2,7 @@
 fastapi>=0.110,<0.120
 uvicorn[standard]>=0.29,<0.40
 python-multipart>=0.0.9
+python-dotenv>=1.0,<2  # loads backend/.env in api.py:load_dotenv()
 
 # ── Validation / models ───────────────────────────────────────────────────────
 pydantic>=2.5,<3

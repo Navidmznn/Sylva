@@ -1,28 +1,14 @@
-"""
-auth.py — magic-link auth + session core.
+"""Magic-link auth and session management.
 
-Design notes
-────────────
-Tokens (magic + session) are generated with `secrets.token_urlsafe(32)` and
-NEVER stored in the database. The DB only ever sees an HMAC-SHA-256 of the
-token, keyed by SESSION_SECRET. This means:
+Tokens are generated with secrets.token_urlsafe(32) and never stored raw.
+The DB only sees an HMAC-SHA-256(token, SESSION_SECRET) digest, so a DB
+read leak alone can't be used to log in. Rotating SESSION_SECRET
+invalidates every live token — by design.
 
-  * A DB read leak does not enable login (attacker would need SESSION_SECRET).
-  * SESSION_SECRET rotation invalidates all live tokens — intentional.
-
-The opaque session token rides in an httpOnly cookie. Cookie attributes are
-fully env-driven so dev (insecure, SameSite=lax) and prod (Secure,
-SameSite=strict) share one code path.
-
-Anti-enumeration: `request_magic_link` is idempotent and silently
-auto-creates users on first contact. Callers should never branch their
-response on whether a user pre-existed.
-
-CSRF: with SameSite=strict in prod, the cookie isn't attached to cross-site
-requests at all, so CSRF is not reachable. In dev (SameSite=lax) the cookie
-is attached only on top-level GET navigation; our state-changing endpoints
-are POST/DELETE so lax is sufficient for local development. No CSRF token
-infrastructure is needed at this scope. (Documented also in README.)
+CSRF: production uses SameSite=strict, so the session cookie isn't sent on
+cross-site requests at all. Dev uses SameSite=lax; every state-changing
+endpoint is POST/DELETE, which lax doesn't auto-attach. No CSRF token
+infra needed at this scope. (Don't add a state-changing GET endpoint.)
 """
 from __future__ import annotations
 
@@ -35,18 +21,18 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import Cookie, Depends, HTTPException, Request, Response
-from sqlalchemy import delete, select
+from sqlalchemy import delete, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from db import AsyncSessionLocal, get_session
 from db_models import MagicToken, Session as SessionRow, User
 
 
-# ── Configuration (env) ──────────────────────────────────────────────────────
+# Configuration
 SESSION_SECRET: str = os.environ.get("SESSION_SECRET", "")
 if not SESSION_SECRET:
-    # Fail loud at import time in production. Local dev gets a stable random
-    # default so the app boots, but tokens won't survive a restart.
+    # Hard fail in prod. Dev gets an ephemeral key — tokens won't survive a restart.
     if os.environ.get("ENVIRONMENT", "development").lower() == "production":
         raise RuntimeError("SESSION_SECRET must be set in production.")
     SESSION_SECRET = "dev-only-not-secret-" + secrets.token_hex(8)
@@ -61,11 +47,11 @@ if COOKIE_SAMESITE not in ("strict", "lax", "none"):
     COOKIE_SAMESITE = "lax"
 
 
-# ── Helpers ──────────────────────────────────────────────────────────────────
+# Helpers
+
 def normalize_email(raw: str) -> str:
-    """Lowercase + strip. Sufficient for our scope; we don't try to canonicalize
-    plus-tags or punycode hosts — the goal is dedup on accidental case/whitespace
-    differences, not to fight every edge case."""
+    """Lowercase + strip. We don't try to canonicalize plus-tags or punycode —
+    just dedup on accidental case/whitespace differences."""
     if not isinstance(raw, str):
         raise HTTPException(status_code=400, detail="Email is required.")
     out = raw.strip().lower()
@@ -75,8 +61,6 @@ def normalize_email(raw: str) -> str:
 
 
 def hash_token(raw_token: str) -> str:
-    """HMAC-SHA-256(token, SESSION_SECRET) → hex. Constant length, safe to
-    store and to use in DB equality lookups."""
     return hmac.new(
         SESSION_SECRET.encode("utf-8"),
         raw_token.encode("utf-8"),
@@ -88,14 +72,12 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-# ── Magic-link issuance ──────────────────────────────────────────────────────
-async def request_magic_link(email_raw: str) -> tuple[str, User]:
-    """Create (or fetch) the user, issue a fresh magic token, return
-    (raw_token, user). The caller is responsible for emailing the link.
+# Magic-link issuance
 
-    Always succeeds for any well-formed email. Never reveals whether the user
-    pre-existed.
-    """
+async def request_magic_link(email_raw: str) -> tuple[str, User]:
+    """Create or fetch the user, issue a fresh token, return (raw_token, user).
+    Caller is responsible for emailing the link. Always succeeds for any
+    well-formed email — never reveals whether the user pre-existed."""
     email = normalize_email(email_raw)
     raw_token = secrets.token_urlsafe(32)
     token_hash = hash_token(raw_token)
@@ -108,7 +90,20 @@ async def request_magic_link(email_raw: str) -> tuple[str, User]:
         if user is None:
             user = User(email=email, email_normalized=email)
             session.add(user)
-            await session.flush()  # populate user.id for FK below
+            try:
+                await session.flush()  # populate user.id for the FK below
+            except IntegrityError:
+                # A concurrent /auth/login for the same brand-new email
+                # committed between our SELECT and our INSERT. The unique
+                # constraint on email_normalized just rejected us. Roll back,
+                # re-fetch the row the other request created, and continue —
+                # the caller still gets a fresh magic token bound to the
+                # canonical user row, and the anti-enumeration response in
+                # api.py stays a constant 200.
+                await session.rollback()
+                user = (await session.execute(
+                    select(User).where(User.email_normalized == email)
+                )).scalar_one()
 
         session.add(MagicToken(
             user_id=user.id,
@@ -123,12 +118,14 @@ async def request_magic_link(email_raw: str) -> tuple[str, User]:
 
 async def redeem_magic_link(raw_token: str, db: AsyncSession) -> User:
     """Validate a magic token (not expired, not used), mark it used, return
-    the owning user. Caller is responsible for creating the session +
-    setting the cookie.
+    the owning user. Generic 400 on every failure path — don't tell the
+    client whether the token was malformed, expired, or already used.
 
-    Generic 400 on every failure path — never tell the client whether the
-    token was malformed, expired, or already used. (Reduces signal for
-    brute-force attempts.)
+    The UPDATE … WHERE used_at IS NULL … RETURNING is atomic: two concurrent
+    redemptions of the same token can't both win. Only the first will match
+    the predicate; the second sees rowcount=0 and 400s like a stale link.
+    Without this, a double-click (or an attacker racing a stolen link) would
+    yield two valid sessions from a single-use token.
     """
     if not raw_token or not isinstance(raw_token, str) or len(raw_token) > 200:
         raise HTTPException(status_code=400, detail="Invalid or expired link.")
@@ -136,26 +133,36 @@ async def redeem_magic_link(raw_token: str, db: AsyncSession) -> User:
     token_hash = hash_token(raw_token)
     now = _now()
 
-    result = await db.execute(
-        select(MagicToken).where(MagicToken.token_hash == token_hash)
+    stmt = (
+        update(MagicToken)
+        .where(
+            MagicToken.token_hash == token_hash,
+            MagicToken.used_at.is_(None),
+            MagicToken.expires_at >= now,
+        )
+        .values(used_at=now)
+        .returning(MagicToken.user_id)
     )
-    mt: Optional[MagicToken] = result.scalar_one_or_none()
-    if mt is None or mt.used_at is not None or mt.expires_at < now:
+    row = (await db.execute(stmt)).first()
+    if row is None:
         raise HTTPException(status_code=400, detail="Invalid or expired link.")
 
-    mt.used_at = now
-    user = await db.get(User, mt.user_id)
+    user = await db.get(User, row.user_id)
     if user is None:
+        # Token was valid but the user vanished (e.g. account deleted between
+        # the UPDATE and the SELECT). Same generic 400 — don't disclose this.
+        await db.rollback()
         raise HTTPException(status_code=400, detail="Invalid or expired link.")
 
     await db.commit()
     return user
 
 
-# ── Sessions ─────────────────────────────────────────────────────────────────
+# Sessions
+
 async def create_session(user_id: uuid.UUID, db: AsyncSession) -> str:
-    """Issue a session row and return the raw session token to put in the
-    cookie. Hash is stored, raw is not."""
+    """Issue a session row, return the raw token for the cookie. Only the
+    HMAC is persisted."""
     raw = secrets.token_urlsafe(32)
     expires_at = _now() + timedelta(days=SESSION_TTL_DAYS)
 
@@ -190,8 +197,8 @@ def set_session_cookie(response: Response, raw_token: str) -> None:
 
 
 def clear_session_cookie(response: Response) -> None:
-    # delete_cookie must echo the same path/samesite/secure as the original
-    # set, otherwise some browsers leave the cookie in place.
+    # Must echo the original path/samesite/secure or some browsers leave the
+    # cookie in place.
     response.delete_cookie(
         key=COOKIE_NAME,
         path="/",
@@ -200,13 +207,13 @@ def clear_session_cookie(response: Response) -> None:
     )
 
 
-# ── FastAPI dependencies ─────────────────────────────────────────────────────
+# FastAPI dependencies
+
 async def get_current_user(
     request: Request,
     db: AsyncSession = Depends(get_session),
 ) -> Optional[User]:
-    """Returns the logged-in User or None. Use this for endpoints that
-    optionally personalize but don't require auth."""
+    """Logged-in User or None. For routes that optionally personalize."""
     raw = request.cookies.get(COOKIE_NAME)
     if not raw:
         return None
@@ -225,7 +232,6 @@ async def get_current_user(
 async def require_user(
     user: Optional[User] = Depends(get_current_user),
 ) -> User:
-    """Dependency for protected routes. 401 if not logged in."""
     if user is None:
         raise HTTPException(status_code=401, detail="Sign in to continue.")
     return user

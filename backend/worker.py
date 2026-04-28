@@ -1,24 +1,18 @@
-"""
-worker.py — arq worker entry point.
-
-Run with:
-    arq worker.WorkerSettings
-
-The worker pulls jobs off the `arq:queue:default` list, runs the same
-extraction pipeline that lived synchronously inside api.py before, and
-persists the result both to Postgres (via SQLAlchemy) and to a Redis
-job-state blob (via jobs.write_state).
-
-This file does NOT modify any of the existing extraction modules
-(extractor.py, scorer.py, parser.py, models.py). It just orchestrates
-them — exactly as api.py used to.
-"""
+"""arq worker. Runs the Docling → score → prune → Ollama → validate pipeline
+off the request thread. Run with: `arq worker.WorkerSettings`."""
 from __future__ import annotations
+
+# Load .env BEFORE sibling imports — same reasoning as api.py: constants.py,
+# db.py, and redis_client.py all read env vars at import time.
+from dotenv import load_dotenv
+load_dotenv()
 
 import concurrent.futures
 import json
 import logging
 import os
+import re
+import unicodedata
 from typing import Any
 
 from arq.connections import RedisSettings
@@ -28,7 +22,7 @@ from constants import CONTEXT_SIZES
 from db import AsyncSessionLocal
 from db_models import Syllabus
 from extractor import extract_document
-from jobs import write_state
+from jobs import read_state, release_job_slot, write_state
 from models import SyllabusData
 from parser import word_parser
 from scorer import prune_blocks_to_context_limit, score_and_size_blocks
@@ -37,25 +31,18 @@ from scorer import prune_blocks_to_context_limit, score_and_size_blocks
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Mirrors api.py — defense in depth even though arq has its own job timeout.
+# Mirrors api.py — defense in depth on top of arq's job_timeout.
 DOCLING_TIMEOUT_SECONDS: int = int(os.environ.get("DOCLING_TIMEOUT_SECONDS", "500"))
 REDIS_URL: str = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
 
 def _redis_settings_from_url(url: str) -> RedisSettings:
-    """Convert a redis:// URL into arq's RedisSettings dataclass."""
     return RedisSettings.from_dsn(url)
 
 
-# ── The validation helpers that previously lived in api.py ────────────────────
-# These are literal copies of the api.py functions. They run inside the worker
-# (post-extraction) because the LLM output cannot be validated until after
-# parsing. Keeping them here means the worker has zero runtime dependency on
-# the FastAPI app module.
-
-import re                       # noqa: E402
-import unicodedata               # noqa: E402
-
+# Validation helpers — duplicated from api.py so the worker has no runtime
+# dependency on the FastAPI app module. Keep these in sync if the patterns
+# change.
 _INJECTION_PATTERNS = re.compile(
     r"[^\n]*\b(?:ignore|disregard|forget|your instructions|system prompt"
     r"|/etc/|<script|eval\(|base64)\b[^\n]*",
@@ -85,8 +72,8 @@ def sanitize_extracted_text(text: str) -> str:
 
 
 class _LLMOutputError(Exception):
-    """Raised when the LLM's parsed JSON fails validation. The worker catches
-    this and writes a 'failed' state with the message preserved."""
+    """LLM output failed validation. The worker writes a 'failed' state with
+    this message preserved."""
 
 
 def validate_llm_output(data: dict) -> None:
@@ -107,8 +94,8 @@ def validate_llm_output(data: dict) -> None:
 
 
 def _run_extraction_with_timeout(tmp_path: str):
-    """Same pattern as api.py's run_extraction_with_timeout: ThreadPoolExecutor
-    avoids the cold-start cost of multiprocessing.spawn on Windows."""
+    # ThreadPoolExecutor (not multiprocessing) avoids the cold-start cost of
+    # spawn() on Windows.
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(extract_document, tmp_path)
         try:
@@ -117,35 +104,34 @@ def _run_extraction_with_timeout(tmp_path: str):
             raise _LLMOutputError("Processing timed out during extraction.")
 
 
-# ── The actual job ────────────────────────────────────────────────────────────
+# The job
+
 async def process_syllabus(
     ctx: dict,
     job_id: str,
     tmp_path: str,
     safe_filename: str,
-    user_id: str,
+    user_id: str | None,
 ) -> dict:
-    """Run the full extraction pipeline and persist the result.
-
-    `user_id` is the UUID (as str) of the User who uploaded — supplied by
-    the API at enqueue time. The persisted Syllabus row is FK-bound to it,
-    and the result is read by /jobs/{id} only for the matching user.
-    """
-    logger.info("[%s] starting job for %s (user=%s)", job_id, safe_filename, user_id)
+    """Run the extraction pipeline. user_id is the User UUID supplied by the
+    API at enqueue time, or None for guest uploads. Guest jobs skip the DB
+    insert — their parsed result lives only in Redis job state (TTL'd) and
+    in the requesting browser's memory. No persistence, by design."""
+    logger.info(
+        "[%s] starting job for %s (user=%s)",
+        job_id, safe_filename, user_id or "<guest>",
+    )
 
     try:
-        # ── Phase: extracting ────────────────────────────────────────────────
         await write_state(job_id, status="running", phase="extracting")
         blocks = _run_extraction_with_timeout(tmp_path)
 
-        # ── Phase: scoring + pruning ─────────────────────────────────────────
         await write_state(job_id, status="running", phase="scoring")
         score_and_size_blocks(blocks)
         pruned = prune_blocks_to_context_limit(blocks, CONTEXT_SIZES["fast"])
         raw_text = "\n\n".join(b.text for b in pruned)
         full_text = sanitize_extracted_text(raw_text)
 
-        # ── Phase: LLM parsing ───────────────────────────────────────────────
         await write_state(job_id, status="running", phase="parsing")
         raw_result = await word_parser(full_text, CONTEXT_SIZES["fast"])
 
@@ -154,7 +140,6 @@ async def process_syllabus(
         except json.JSONDecodeError as e:
             raise _LLMOutputError("LLM returned invalid JSON.") from e
 
-        # ── Phase: validating ────────────────────────────────────────────────
         await write_state(job_id, status="running", phase="validating")
         try:
             validated = SyllabusData.model_validate(parsed_json)
@@ -164,22 +149,24 @@ async def process_syllabus(
 
         validate_llm_output(parsed_json)
 
-        # ── Persist to Postgres ──────────────────────────────────────────────
-        async with AsyncSessionLocal() as session:
-            await session.execute(
-                insert(Syllabus).values(
-                    user_id=user_id,
-                    filename=safe_filename,
-                    data=parsed_json,
-                    job_id=job_id,
+        # Guests skip persistence entirely. Their result still flows back to
+        # the browser via /jobs/{id} (Redis state, TTL'd) — they just don't
+        # get a syllabus row, can't list it via /syllabi, and can't refresh
+        # to recover it. "Sign in to save" is the upgrade path.
+        if user_id is not None:
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    insert(Syllabus).values(
+                        user_id=user_id,
+                        filename=safe_filename,
+                        data=parsed_json,
+                        job_id=job_id,
+                    )
                 )
-            )
-            await session.commit()
+                await session.commit()
 
-        # ── Final state ──────────────────────────────────────────────────────
-        # Result shape mirrors what /upload returned in the synchronous era:
+        # Result shape matches the v1 synchronous /upload contract:
         #   { "filename": str, "data": dict }
-        # This is what the frontend reads via the polling endpoint's `result`.
         result = {"filename": safe_filename, "data": parsed_json}
         await write_state(job_id, status="complete", phase="complete", result=result)
         logger.info("[%s] complete", job_id)
@@ -188,7 +175,6 @@ async def process_syllabus(
     except _LLMOutputError as e:
         logger.warning("[%s] failed: %s", job_id, e)
         await write_state(job_id, status="failed", phase="validating", error=str(e))
-        # Re-raise so arq records this as a job failure too.
         raise
 
     except Exception as e:
@@ -202,8 +188,21 @@ async def process_syllabus(
         raise
 
     finally:
-        # The temp file was created by the API and handed off via path. The
-        # worker owns its lifecycle from enqueue onward.
+        # Release the per-IP concurrency slot. This is the PRIMARY release
+        # path — guaranteed to fire for any caught exception or successful
+        # completion. The API's GET /jobs/{id} also calls release on terminal
+        # status as a backstop for cases where this finally never runs (the
+        # worker process was killed). Both paths are idempotent via the
+        # slot_released marker inside release_job_slot.
+        try:
+            state = await read_state(job_id)
+            uploader_ip = (state or {}).get("uploader_ip")
+            if uploader_ip:
+                await release_job_slot(job_id, uploader_ip)
+        except Exception:
+            logger.exception("[%s] slot release failed", job_id)
+
+        # Worker owns the temp file from enqueue onward.
         try:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
@@ -212,18 +211,14 @@ async def process_syllabus(
 
 
 class WorkerSettings:
-    """arq picks this up via `arq worker.WorkerSettings`."""
-
     functions = [process_syllabus]
     redis_settings = _redis_settings_from_url(REDIS_URL)
 
-    # arq's per-job hard ceiling. The Docling timeout inside the function
-    # hits first under normal failure; this is a backstop for everything else.
+    # Backstop for everything Docling's own timeout doesn't catch.
     job_timeout = DOCLING_TIMEOUT_SECONDS + 60
 
-    # We don't retry: extraction failures are almost always deterministic
-    # (bad PDF, LLM output shape) and a retry just wastes ~60 s.
+    # Don't retry — extraction failures are deterministic (bad PDF / bad LLM
+    # output shape) and a retry just wastes ~60 s.
     max_tries = 1
 
-    # Keep a small history so duplicate-job-id submissions can be detected.
-    keep_result = 60 * 60   # 1 hour
+    keep_result = 60 * 60

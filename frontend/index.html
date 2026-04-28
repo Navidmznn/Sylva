@@ -50,6 +50,9 @@
            Both panels start hidden; refreshAuth() reveals exactly one
            after GET /auth/me resolves. -->
       <div id="auth-widget" class="auth-widget" data-state="loading">
+        <!-- Guest badge — shown only when data-state="out". CSS-driven so
+             we don't need a third JS path; renderAuth() just sets data-state. -->
+        <span class="auth-guest-pill" id="auth-guest-pill" title="Sign in to save your data across sessions">Guest</span>
         <!-- Logged-out form -->
         <form id="auth-login-form" class="auth-login-form" hidden>
           <input
@@ -88,7 +91,10 @@
           <div class="book book-3"></div>
           <div class="pencil"></div>
         </div>
-        <h1 class="upload-title">Drop your syllabus here</h1>
+        <h1 class="upload-title">
+          <span class="upload-title__expanded">Drop your syllabus here</span>
+          <span class="upload-title__minimized">Add another syllabus</span>
+        </h1>
         <p class="upload-subtitle">We will extract all your deadlines, assessments, and schedule automatically</p>
         <button type="button" class="upload-btn">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
