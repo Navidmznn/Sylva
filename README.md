@@ -115,8 +115,8 @@ extraction behaviour. Disabled in production via `UPLOAD_SYNC_ENABLED=false`.
 ### 1. Clone
 
 ```bash
-git clone https://github.com/Navidmznn/syllabus-ai.git
-cd syllabus-ai
+git clone https://github.com/Navidmznn/Course_helper.git
+cd Course_helper
 ```
 
 ### 2. Start Postgres + Redis

@@ -1,9 +1,4 @@
-# ─────────────────────────────────────────────────────────────────────────────
-# syllabus.ai — .gitignore
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-# ── Python — compiled / cache ─────────────────────────────────────────────────
+# python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -11,15 +6,13 @@ __pycache__/
 *.pyo
 .Python
 
-
-# ── Python — virtual environments ────────────────────────────────────────────
+# virtual environments
 .venv/
 venv/
 env/
 ENV/
 
-
-# ── Python — package / distribution artifacts ────────────────────────────────
+# package / distribution
 *.egg
 *.egg-info/
 dist/
@@ -27,8 +20,7 @@ build/
 eggs/
 wheels/
 
-
-# ── Python — testing / coverage ──────────────────────────────────────────────
+# testing / coverage
 .pytest_cache/
 .coverage
 .coverage.*
@@ -36,37 +28,31 @@ htmlcov/
 .tox/
 .nox/
 
-
-# ── Python — type checking / linting caches ──────────────────────────────────
+# type checking / linting
 .mypy_cache/
 .ruff_cache/
 .dmypy.json
 
-
-# ── Databases / data ─────────────────────────────────────────────────────────
+# databases
 *.db
 *.sqlite
 *.sqlite3
 results.db
 
-
-# ── Environment / secrets ────────────────────────────────────────────────────
+# environment / secrets
 .env
 .env.*
 !.env.example
 
-
-# ── Uploaded / generated files ───────────────────────────────────────────────
+# uploaded / generated files
 *.pdf
 uploads/
 tmp/
 
-
-# ── Project-specific ─────────────────────────────────────────────────────────
+# project-specific
 Modelfile
 
-
-# ── IDE / editors ────────────────────────────────────────────────────────────
+# IDE / editors
 .idea/
 .vscode/
 *.swp
@@ -74,8 +60,7 @@ Modelfile
 *.swn
 *~
 
-
-# ── OS ───────────────────────────────────────────────────────────────────────
+# OS
 .DS_Store
 .DS_Store?
 ._*
@@ -85,25 +70,17 @@ ehthumbs.db
 Thumbs.db
 desktop.ini
 
-
-# ── Logs ─────────────────────────────────────────────────────────────────────
+# logs
 logs/
 *.log
 npm-debug.log*
 
-
-# ── Node (if a frontend build step is ever added) ────────────────────────────
+# node
 node_modules/
 .npm
 .yarn/
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/sdks
-!.yarn/versions
 
-
-# ── Frontend build outputs (if a build step is ever added) ───────────────────
+# frontend build outputs
 .cache/
 .parcel-cache/
 .next/
