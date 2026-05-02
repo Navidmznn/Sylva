@@ -16,7 +16,7 @@ SMTP_HOST: str = os.environ.get("SMTP_HOST", "")
 SMTP_PORT: int = int(os.environ.get("SMTP_PORT", "587"))
 SMTP_USER: str = os.environ.get("SMTP_USER", "")
 SMTP_PASSWORD: str = os.environ.get("SMTP_PASSWORD", "")
-SMTP_FROM: str = os.environ.get("SMTP_FROM", "no-reply@syllabus.local")
+SMTP_FROM: str = os.environ.get("SMTP_FROM", "no-reply@sylva.local")
 SMTP_USE_TLS: bool = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
 
 
@@ -44,10 +44,10 @@ def _send_smtp_blocking(to_email: str, subject: str, body: str) -> None:
 
 
 async def send_magic_link_email(to_email: str, link: str) -> None:
-    subject = "Your syllabus.ai sign-in link"
+    subject = "Your Sylva sign-in link"
     body = (
         "Hi,\n\n"
-        "Click the link below to sign in to syllabus.ai. The link is single-use\n"
+        "Click the link below to sign in to Sylva. The link is single-use\n"
         "and will expire shortly.\n\n"
         f"{link}\n\n"
         "If you didn't request this, you can safely ignore this email.\n"

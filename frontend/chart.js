@@ -142,7 +142,7 @@ function commitEdit(courseIndex) {
   _editingIndex = null;
   rebuildChart(courseIndex);
 
-  window.dispatchEvent(new CustomEvent('syllabusapp:assessmentupdated'));
+  window.dispatchEvent(new CustomEvent('sylva:assessmentupdated'));
 }
 
 function rebuildChart(courseIndex) {

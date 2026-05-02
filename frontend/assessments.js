@@ -92,7 +92,7 @@ function commitEdit(i, flatAssessments) {
 
   _editingIndex = null;
 
-  window.dispatchEvent(new CustomEvent('syllabusapp:assessmentupdated'));
+  window.dispatchEvent(new CustomEvent('sylva:assessmentupdated'));
 }
 
 const ICON_PENCIL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -316,7 +316,7 @@ function addToCalendar(provider, assessment) {
     url = `https://outlook.live.com/calendar/0/deeplink/compose?subject=${title}&body=${details}&startdt=${start}&enddt=${end || start}&allday=true&path=%2Fcalendar%2Faction%2Fcompose`;
   } else if (provider === 'apple') {
     const ics = [
-      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//syllabus.ai//EN',
+      'BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//Sylva//EN',
       'BEGIN:VEVENT',
       `SUMMARY:${assessment.title || 'Assessment'}`,
       `DESCRIPTION:Worth ${assessment.weight_percent ?? '?'}%`,

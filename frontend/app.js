@@ -49,7 +49,7 @@ const loadingModal = document.getElementById('loading-modal');
 const clearDataBtn = document.getElementById('clear-data-btn');
 
 // signed-in users get localStorage cache, guests are memory-only
-const LS_KEY        = 'syllabusApp_courses';
+const LS_KEY        = 'sylva_courses';
 const LS_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 function persistCourses() {
@@ -124,10 +124,10 @@ async function initFromStorage() {
       clearDataBtn.style.display = 'inline-flex';
 
       persistCourses();
-      console.log(`[Syllabus App] Restored ${allCourses.length} course(s) from backend.`);
+      console.log(`[Sylva] Restored ${allCourses.length} course(s) from backend.`);
       return;
     } catch (e) {
-      console.warn('[Syllabus App] Backend restore failed, falling back to localStorage:', e.message);
+      console.warn('[Sylva] Backend restore failed, falling back to localStorage:', e.message);
     }
 
     const saved = loadPersistedCourses();
@@ -135,7 +135,7 @@ async function initFromStorage() {
     await addCourses(saved);
     renderAllSections();
     clearDataBtn.style.display = 'inline-flex';
-    console.log(`[Syllabus App] Restored ${saved.length} course(s) from localStorage.`);
+    console.log(`[Sylva] Restored ${saved.length} course(s) from localStorage.`);
     return;
   }
 
@@ -170,7 +170,7 @@ deleteCourseBtn.addEventListener('click', async () => {
 
     if (siblingsLeft.length === 0) {
       apiFetch(`/syllabi/${syllabusId}`, { method: 'DELETE' }).catch(e => {
-        console.warn('[Syllabus App] Backend delete failed:', e.message);
+        console.warn('[Sylva] Backend delete failed:', e.message);
       });
     } else {
       const updatedCourses = siblingsLeft.map(({ _syllabusId: _, ...c }) => c);
@@ -178,7 +178,7 @@ deleteCourseBtn.addEventListener('click', async () => {
         method: 'PATCH',
         body: { courses: updatedCourses },
       }).catch(e => {
-        console.warn('[Syllabus App] Backend patch failed:', e.message);
+        console.warn('[Sylva] Backend patch failed:', e.message);
       });
     }
   }
@@ -300,8 +300,8 @@ fileInput.addEventListener('change', async () => {
     clearDataBtn.style.display = 'inline-flex';
 
     // nudge guests once per session
-    if (!authState.user && !sessionStorage.getItem('syllabusApp_guestNudgeShown')) {
-      sessionStorage.setItem('syllabusApp_guestNudgeShown', '1');
+    if (!authState.user && !sessionStorage.getItem('sylva_guestNudgeShown')) {
+      sessionStorage.setItem('sylva_guestNudgeShown', '1');
       showToast('Sign in to save your courses across sessions.', 'info');
     }
 
@@ -353,7 +353,7 @@ async function pollJobUntilDone(jobId, { intervalMs = 2000, onProgress } = {}) {
 }
 
 // re-render only the assessment-related views after an edit
-window.addEventListener('syllabusapp:assessmentupdated', () => {
+window.addEventListener('sylva:assessmentupdated', () => {
   persistCourses();
   renderAssessmentList();
   const idx = Math.min(getCurrentChartIndex(), courses.length - 1);

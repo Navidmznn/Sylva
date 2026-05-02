@@ -1,4 +1,4 @@
-# syllabus.ai
+# Sylva
 
 Upload a university syllabus PDF. Get structured assignments, deadlines,
 grade weights, a calendar view, and a what-if grade calculator — all parsed

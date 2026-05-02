@@ -8,7 +8,7 @@ PRIVACY_MARKDOWN = """\
 
 Last updated: 2026-04-26
 
-syllabus.ai parses course syllabi you upload and turns them into a structured
+Sylva parses course syllabi you upload and turns them into a structured
 dashboard. This page covers what gets stored and how to remove it.
 
 ## What is stored
@@ -141,7 +141,7 @@ def render_privacy_html() -> str:
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Privacy Policy — syllabus.ai</title>
+  <title>Privacy Policy — Sylva</title>
   <style>
     body {{
       max-width: 720px;
