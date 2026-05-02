@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models. Tables: users, magic_tokens, sessions, syllabi."""
+"""ORM models — users, magic_tokens, sessions, syllabi."""
 from __future__ import annotations
 
 import uuid
@@ -19,9 +19,7 @@ class User(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    # email is the user-visible form; email_normalized is the lookup key
-    # (stripped + lowercased). Two columns so we can show users the casing
-    # they typed while deduping case-insensitively.
+    # keep the original casing for display, normalize for lookups
     email:            Mapped[str] = mapped_column(String(320), nullable=False)
     email_normalized: Mapped[str] = mapped_column(
         String(320), nullable=False, unique=True, index=True
@@ -42,9 +40,7 @@ class User(Base):
 
 
 class MagicToken(Base):
-    """Single-use sign-in token. token_hash = HMAC-SHA-256(raw, SESSION_SECRET).
-    used_at is set on first redemption; single-use is enforced by checking
-    used_at IS NULL during validation."""
+    """Single-use sign-in token. token_hash = HMAC of the raw token."""
 
     __tablename__ = "magic_tokens"
 
@@ -68,7 +64,7 @@ class MagicToken(Base):
 
 
 class Session(Base):
-    """Server-side session row. session_hash = HMAC of the cookie value."""
+    """Session row. session_hash = HMAC of the cookie value."""
 
     __tablename__ = "sessions"
 
@@ -96,7 +92,6 @@ class Syllabus(Base):
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
-    # NOT NULL since migration 0002 — pre-auth orphan rows were deleted.
     user_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )

@@ -1,7 +1,4 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   ASSESSMENTS — sorted assessment list with per-row edit + calendar export
-   (Google / Outlook / Apple). Owns the click flows for those buttons.
-═══════════════════════════════════════════════════════════════════════════ */
+// Sorted assessment list with per-row edit and calendar export buttons.
 
 import { courses } from './state.js';
 import { escapeHtml, expandAssessments, getCourseColors, showToast } from './utils.js';
@@ -13,13 +10,8 @@ const toggleEl  = document.getElementById('hide-past-toggle');
 const CLIENT_ID = '527779540782-69q8f06ust49om49b9g36cknv1pes405.apps.googleusercontent.com';
 const SCOPES    = 'https://www.googleapis.com/auth/calendar.events';
 
-// Closure ref so the hide-past toggle can re-render from the same flat list.
 let _buildAssessmentRows = null;
-
-// Flat-list index of the row currently open for editing; null = none.
 let _editingIndex = null;
-
-// ── Date helpers ─────────────────────────────────────────────────────────────
 
 function getAssessmentDate(a) {
   const raw = a.date || a.start || (a.dates && a.dates[0]) || null;
@@ -33,21 +25,13 @@ function formatDisplayDate(a) {
   return d.toLocaleDateString('en-CA', { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
-// ── Flat assessment builder ───────────────────────────────────────────────────
-// Annotates every expanded item with _courseIdx, _courseLabel, and _originalIdx
-// so that commitEdit() can write back to courses[courseIdx].assessments[originalIdx].
-//
-// Lookup is by stable `id` (assigned in state.js at addCourses time), so
-// renaming an assessment does not strand the flat-list row from its parent.
-// expandAssessments propagates `id` via object spread, so expanded children
-// share their parent's id; _expandedIndex distinguishes siblings.
+// Build a flat sorted list, tagging each row with the parent course/index
+// so commitEdit can write back. Lookup is by `id`, not title.
 
 function buildFlatAssessments() {
   return courses.flatMap((course, courseIdx) => {
     const originals = course.assessments || [];
     return expandAssessments(originals).map(a => {
-      // expandAssessments propagates `id` via spread for expanded copies, so
-      // every entry — expanded or not — points back to its parent by `id`.
       const originalIdx = originals.findIndex(o => o.id === a.id);
       return {
         ...a,
@@ -66,8 +50,6 @@ function buildFlatAssessments() {
   });
 }
 
-// ── Commit edit to state ──────────────────────────────────────────────────────
-
 function commitEdit(i, flatAssessments) {
   const a   = flatAssessments[i];
   const row = listEl.querySelector(`.assessment-row[data-index="${i}"]`);
@@ -81,13 +63,10 @@ function commitEdit(i, flatAssessments) {
 
   const isExpanded = a._parentTitle !== undefined;
 
-  // ── Title ────────────────────────────────────────────────────────────────
   const newTitle = row.querySelector('.edit-title-input')?.value.trim();
   if (newTitle) original.title = newTitle;
 
-  // ── Weight ───────────────────────────────────────────────────────────────
-  // The edit input shows per-occurrence weight for expanded items.
-  // We store total weight on the original, so multiply back.
+  // expanded items show per-occurrence weight, we store the total
   const rawWeight = row.querySelector('.edit-weight-input')?.value;
   const newWeight = parseFloat(rawWeight);
   if (!isNaN(newWeight) && newWeight >= 0) {
@@ -96,13 +75,11 @@ function commitEdit(i, flatAssessments) {
       : newWeight;
   }
 
-  // ── Date ─────────────────────────────────────────────────────────────────
   const newDate    = row.querySelector('.edit-date-input')?.value    || '';
   const newEndDate = row.querySelector('.edit-end-date-input')?.value || '';
 
   if (newDate) {
     if (isExpanded) {
-      // Write back into the specific slot of the parent's dates array.
       if (!Array.isArray(original.dates)) original.dates = [];
       original.dates[(a._expandedIndex ?? 1) - 1] = newDate;
     } else if (original.start !== null && original.start !== undefined) {
@@ -115,11 +92,8 @@ function commitEdit(i, flatAssessments) {
 
   _editingIndex = null;
 
-  // Notify app.js: persist to localStorage + re-render affected views.
   window.dispatchEvent(new CustomEvent('syllabusapp:assessmentupdated'));
 }
-
-// ── SVG icon strings ─────────────────────────────────────────────────────────
 
 const ICON_PENCIL = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
   <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
@@ -130,8 +104,6 @@ const ICON_CHECK = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" 
   <polyline points="20 6 9 17 4 12"/>
 </svg>`;
 
-// ── Row renderers ─────────────────────────────────────────────────────────────
-
 function renderNormalRow(a, i, today, hidePast) {
   const d    = getAssessmentDate(a);
   const past = d && d < today;
@@ -139,9 +111,7 @@ function renderNormalRow(a, i, today, hidePast) {
 
   const weight = a.weight_percent != null ? `${a.weight_percent}%` : '';
   const colors = getCourseColors(a._courseIdx);
-  // Calendar export only makes sense when buildEventDates() can resolve a
-  // start date. Without one, the .ics export would have shipped 19700101 —
-  // disable the buttons instead.
+  // disable calendar export when there's no date to anchor on
   const noDate = !buildEventDates(a).start;
 
   return `
@@ -173,12 +143,10 @@ function renderNormalRow(a, i, today, hidePast) {
 function renderEditRow(a, i) {
   const isExpanded = a._parentTitle !== undefined;
 
-  // For a range assessment, show separate start/end date inputs.
   const hasRange   = !isExpanded && !a.date && a.start;
   const dateVal    = a.date || a.start || '';
   const endVal     = a.end  || '';
 
-  // Show per-occurrence weight; save handler will multiply back to total.
   const weightVal  = a.weight_percent != null ? a.weight_percent : '';
   const editTitle  = isExpanded ? (a._parentTitle || '') : (a.title || '');
 
@@ -243,8 +211,6 @@ function renderEditRow(a, i) {
   `;
 }
 
-// ── Main export ───────────────────────────────────────────────────────────────
-
 export function renderAssessmentList() {
   const flatAssessments = buildFlatAssessments();
   const today = new Date();
@@ -261,12 +227,10 @@ export function renderAssessmentList() {
         : renderNormalRow(a, i, today, hidePast)
     ).join('');
 
-    // ── Normal row listeners ────────────────────────────────────────────────
     listEl.querySelectorAll('.assessment-row:not(.is-editing)').forEach(row => {
       const i = parseInt(row.dataset.index);
       const a = flatAssessments[i];
 
-      // Edit button — opens edit mode; any existing open edit is discarded.
       row.querySelector('.edit-btn')
         ?.addEventListener('click', () => {
           _editingIndex = i;
@@ -282,7 +246,6 @@ export function renderAssessmentList() {
       });
     });
 
-    // ── Edit row listeners ──────────────────────────────────────────────────
     listEl.querySelectorAll('.assessment-row.is-editing').forEach(row => {
       const i = parseInt(row.dataset.index);
 
@@ -295,7 +258,6 @@ export function renderAssessmentList() {
           _buildAssessmentRows();
         });
 
-      // Keyboard shortcuts inside any edit input.
       row.querySelectorAll('.edit-input').forEach(input => {
         input.addEventListener('keydown', e => {
           if (e.key === 'Enter')  commitEdit(i, flatAssessments);
@@ -310,8 +272,6 @@ export function renderAssessmentList() {
 
   _buildAssessmentRows();
 }
-
-// ── Calendar helpers (unchanged) ──────────────────────────────────────────────
 
 function calBtn(provider, assessment, disabled = false) {
   const icons = {
@@ -342,8 +302,6 @@ function toISOBasic(dateStr) {
 
 function addToCalendar(provider, assessment) {
   const { start, end } = buildEventDates(assessment);
-  // Defensive: the export buttons are rendered disabled when no date exists,
-  // but any direct caller must still be guarded.
   if (!start) {
     showToast('No date set for this assessment.', 'warning');
     return;
@@ -422,7 +380,6 @@ function addToGoogleCalendar(assessment) {
   }).requestAccessToken();
 }
 
-// ── Static listeners ────────────────────────────────────────────────────────
 toggleEl.addEventListener('change', () => {
   if (_buildAssessmentRows) _buildAssessmentRows();
 });

@@ -11,7 +11,6 @@ from constants import (
 )
 
 
-# Matches ```json ... ``` or ``` ... ``` in a single pass.
 _CODE_FENCE_RE = re.compile(
     r"^\s*```(?:json)?\s*(.*?)\s*```\s*$",
     re.IGNORECASE | re.DOTALL
@@ -19,9 +18,7 @@ _CODE_FENCE_RE = re.compile(
 
 
 def neutralize_prompt_delimiters(text: str) -> str:
-    """Stop PDF content from closing or reopening the trusted wrapper tags.
-    A PDF containing </untrusted_syllabus_text> could otherwise escape the
-    delimiter boundary and inject text into the trusted portion of the prompt."""
+    """Strip wrapper tags so PDF content can't escape the trust boundary."""
     return (
         text
         .replace("<untrusted_syllabus_text>",  "[removed opening delimiter]")
@@ -30,8 +27,7 @@ def neutralize_prompt_delimiters(text: str) -> str:
 
 
 def strip_code_fences(raw: str) -> str:
-    """Ollama with format='json' usually returns bare JSON, but some models
-    wrap output in ```json fences. Regex match handles all fence variants."""
+    """Strip ```json fences if the model wrapped its output."""
     raw = raw.strip()
     match = _CODE_FENCE_RE.match(raw)
     if match:
@@ -47,7 +43,7 @@ def build_syllabus_prompt(extracted_text: str) -> str:
 async def word_parser(extracted_text: str, context_size: int) -> str:
     prompt = build_syllabus_prompt(extracted_text)
 
-    # Explicit timeout — None lets Ollama hang forever on a stuck model.
+    # don't let a stuck model hang forever
     timeout = httpx.Timeout(
         timeout=float(OLLAMA_TIMEOUT),
         connect=10.0,
@@ -65,7 +61,7 @@ async def word_parser(extracted_text: str, context_size: int) -> str:
                 "stream": False,
                 "options": {
                     "num_ctx": context_size,
-                    "temperature": 0,   # extraction — consistency over creativity
+                    "temperature": 0,
                 },
                 "messages": [
                     {"role": "system", "content": SYSTEM_PROMPT},

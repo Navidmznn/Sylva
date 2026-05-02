@@ -1,7 +1,6 @@
-// Cross-cutting helpers used by multiple modules.
+// Cross-cutting helpers.
 
-// HTML-escape before innerHTML interpolation. LLM-derived strings (course
-// titles, instructor names, etc.) are untrusted and must pass through this.
+// escape anything LLM-derived before innerHTML
 export function escapeHtml(str) {
   return String(str)
     .replace(/&/g, '&amp;')
@@ -11,8 +10,7 @@ export function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-// Per-course color via golden-angle HSL rotation — adjacent courses always
-// get visually distinct hues regardless of count.
+// golden-angle hue rotation gives adjacent courses distinct colors
 export function getCourseColors(index) {
   const hue = Math.round((index * 137.508) % 360);
   return {
@@ -21,20 +19,9 @@ export function getCourseColors(index) {
   };
 }
 
-// Multi-date assessment expander.
-// Assessments with a `dates` array are logically one item (one pie slice,
-// one weight entry) but should appear as individual occurrences on the
-// calendar, in the assessment list, and in the grade calculator.
-//
-// Returns a flat array where every multi-date assessment is replaced by N
-// copies, each carrying:
-//   _expandedIndex   – 1-based position label  ("Tutorial 1", "Tutorial 2", …)
-//   _expandedTotal   – total sibling count
-//   _expandedWeight  – weight_percent / N      (for grade-calc purposes)
-//   _parentTitle     – original title          (for grouping)
-//
-// Single-date and range assessments pass through unchanged; their
-// _expandedIndex stays undefined so callers can detect un-expanded items.
+// Expand multi-date assessments into one entry per occurrence so they show
+// up individually on the calendar, list, and grade calculator. Single-date
+// items pass through untouched.
 export function expandAssessments(assessments) {
   const out = [];
   for (const a of assessments) {
@@ -63,20 +50,17 @@ export function expandAssessments(assessments) {
   return out;
 }
 
-// Stable id. Used by state.js to tag courses + assessments at ingestion so
-// downstream lookups don't rely on titles (which mutate). The fallback only
-// matters in non-secure contexts (file://) where crypto.randomUUID is absent.
+// fallback only matters on file:// where crypto.randomUUID is missing
 export function uid() {
   if (typeof crypto !== 'undefined' && crypto.randomUUID) return crypto.randomUUID();
   return 'id-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
 }
 
-// Add `n` whole days to a YYYY-MM-DD string. FullCalendar's all-day events
-// have exclusive `end`, so an event ending visually on Friday must pass
-// end=Saturday.
+// Add n days to a YYYY-MM-DD string. FullCalendar uses exclusive ends, so
+// a visual Mon–Fri event needs end=Saturday.
 export function addDays(yyyyMmDd, n) {
   if (!yyyyMmDd || typeof yyyyMmDd !== 'string') return yyyyMmDd;
-  // UTC noon dodges DST/off-by-one timezone issues at midnight.
+  // noon UTC avoids DST edge cases
   const d = new Date(yyyyMmDd + 'T12:00:00Z');
   if (isNaN(d.getTime())) return yyyyMmDd;
   d.setUTCDate(d.getUTCDate() + n);
@@ -84,10 +68,7 @@ export function addDays(yyyyMmDd, n) {
 }
 
 
-// Toast — non-blocking notification. One global host appended on first
-// call. Each toast is its own element so they can stack. Auto-dismiss
-// after `duration` ms; click to dismiss early. role="status" + aria-live
-// for AT compatibility.
+// Toast — stacking, auto-dismiss, click-to-dismiss.
 
 let _toastHost = null;
 
@@ -123,7 +104,7 @@ export function showToast(message, kind = 'info', duration) {
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
     </button>
   `;
-  // textContent — message strings may include user/LLM input.
+  // textContent — message may include LLM/user input
   el.querySelector('.toast-msg').textContent = String(message);
 
   let dismissed = false;
@@ -132,7 +113,7 @@ export function showToast(message, kind = 'info', duration) {
     dismissed = true;
     el.classList.add('toast--leaving');
     el.addEventListener('transitionend', () => el.remove(), { once: true });
-    // Safety net if transitionend never fires.
+    // fallback if transitionend never fires
     setTimeout(() => el.remove(), 400);
   };
 
@@ -146,9 +127,7 @@ export function showToast(message, kind = 'info', duration) {
 }
 
 
-// Confirm — promise-returning replacement for window.confirm(). Resolves
-// true on confirm, false on cancel / Escape / overlay-click. Only one
-// confirm at a time; re-entrant calls reject the previous.
+// Confirm — promise-based replacement for window.confirm(). One at a time.
 
 let _activeConfirmReject = null;
 

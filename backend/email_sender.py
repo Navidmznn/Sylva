@@ -1,6 +1,4 @@
-"""Async email helper. EMAIL_MODE=console prints to stdout (default for dev);
-EMAIL_MODE=smtp sends via stdlib smtplib on a threadpool. stdlib over
-aiosmtplib keeps requirements minimal — sending isn't on a hot path."""
+"""Email helper — console mode for dev, SMTP for prod."""
 from __future__ import annotations
 
 import asyncio
@@ -23,7 +21,6 @@ SMTP_USE_TLS: bool = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
 
 
 def _send_smtp_blocking(to_email: str, subject: str, body: str) -> None:
-    """Sync send. Called via asyncio.to_thread."""
     msg = EmailMessage()
     msg["From"] = SMTP_FROM
     msg["To"] = to_email
@@ -31,7 +28,6 @@ def _send_smtp_blocking(to_email: str, subject: str, body: str) -> None:
     msg.set_content(body)
 
     if SMTP_USE_TLS:
-        # STARTTLS upgrade on port 587.
         with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as smtp:
             smtp.ehlo()
             smtp.starttls(context=ssl.create_default_context())
@@ -40,7 +36,6 @@ def _send_smtp_blocking(to_email: str, subject: str, body: str) -> None:
                 smtp.login(SMTP_USER, SMTP_PASSWORD)
             smtp.send_message(msg)
     else:
-        # Implicit TLS on port 465.
         with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT, timeout=15,
                               context=ssl.create_default_context()) as smtp:
             if SMTP_USER:
@@ -59,7 +54,7 @@ async def send_magic_link_email(to_email: str, link: str) -> None:
     )
 
     if EMAIL_MODE == "console" or not SMTP_HOST:
-        # Print rather than log so it's easy to spot in dev terminals.
+        # easy to spot in the dev terminal
         banner = "─" * 64
         print(f"\n{banner}\n[email] To: {to_email}\n[email] {link}\n{banner}\n", flush=True)
         logger.info("Magic link for %s: %s", to_email, link)
@@ -69,6 +64,5 @@ async def send_magic_link_email(to_email: str, link: str) -> None:
         await asyncio.to_thread(_send_smtp_blocking, to_email, subject, body)
         logger.info("Magic link sent to %s via SMTP", to_email)
     except Exception:
-        # Swallow SMTP errors — surfacing them would let an attacker probe
-        # SMTP config via /auth/login. The user simply won't get an email.
+        # don't surface SMTP errors — they'd leak config to /auth/login probes
         logger.exception("SMTP send failed for %s", to_email)

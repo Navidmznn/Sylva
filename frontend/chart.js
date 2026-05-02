@@ -1,20 +1,17 @@
-// Pie chart of assessment weights + per-card course dropdown. Legend rows
-// are editable: Edit → inline inputs → Save writes back to state and
-// re-renders, then dispatches syllabusapp:assessmentupdated for app.js to
-// persist and sync other views.
+// Pie chart of assessment weights with editable legend rows.
 
 import { courses } from './state.js';
 import { escapeHtml } from './utils.js';
 
 const CHART_COLORS = [
-  '#8FB89E', // sage
-  '#F5C9B8', // peach
-  '#C9B8E8', // lavender
-  '#A8D4E6', // sky
-  '#F2A6A6', // coral
-  '#FFD93D', // yellow
-  '#B8D4C4', // sage light
-  '#E8A68F', // peach dark
+  '#8FB89E',
+  '#F5C9B8',
+  '#C9B8E8',
+  '#A8D4E6',
+  '#F2A6A6',
+  '#FFD93D',
+  '#B8D4C4',
+  '#E8A68F',
 ];
 
 const resultsEl  = document.getElementById('results');
@@ -145,7 +142,6 @@ function commitEdit(courseIndex) {
   _editingIndex = null;
   rebuildChart(courseIndex);
 
-  // Notify app.js: persist + sync other views.
   window.dispatchEvent(new CustomEvent('syllabusapp:assessmentupdated'));
 }
 
@@ -195,7 +191,7 @@ export function renderChart(index) {
   resultsEl.classList.add('show');
 
   legendEl.classList.remove('animate');
-  void legendEl.offsetWidth; // force reflow so slide-in re-fires
+  void legendEl.offsetWidth; // force reflow so the slide-in re-triggers
   rebuildChart(index);
   legendEl.classList.add('animate');
 }

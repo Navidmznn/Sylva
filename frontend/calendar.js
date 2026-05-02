@@ -1,6 +1,4 @@
-/* ═══════════════════════════════════════════════════════════════════════════
-   CALENDAR — FullCalendar instance, type/course filters, event detail modal
-═══════════════════════════════════════════════════════════════════════════ */
+// FullCalendar wrapper — type/course filters and event detail modal.
 
 import { courses } from './state.js';
 import { escapeHtml, expandAssessments, getCourseColors, addDays } from './utils.js';
@@ -33,18 +31,13 @@ function buildCourseEvents(course, courseIdx) {
   const colors   = getCourseColors(courseIdx);
   const expanded = expandAssessments(course.assessments || []);
 
-  // Format a weight value for the description, falling back to "?" rather
-  // than letting "Worth null%" leak into the modal.
   const weightStr = w => (w == null ? '?' : w);
 
   return [
     ...expanded
       .filter(a => a.date || a.start)
       .map(a => {
-        // FullCalendar treats `end` as exclusive on all-day events: an event
-        // that should visually cover Mon–Fri must be passed end=Saturday.
-        // Single-date events use the `date` shorthand so this only matters
-        // for ranges (a.start + a.end).
+        // FullCalendar uses exclusive ends on all-day events
         const dateProps = a.date
           ? { date: a.date }
           : { start: a.start, end: a.end ? addDays(a.end, 1) : undefined };
@@ -67,8 +60,6 @@ function buildCourseEvents(course, courseIdx) {
     ...(course.schedule || []).map(s => ({
       title: `Week ${s.week}: ${s.topic}`,
       start: s.start,
-      // Schedule entries are inclusive ranges in the syllabus data; FullCalendar
-      // expects exclusive ends, so push out by one day.
       end: s.end ? addDays(s.end, 1) : undefined,
       backgroundColor: colors.week,
       borderColor: colors.week,
@@ -131,8 +122,6 @@ export function initCalendar() {
       const end      = e.endStr;
       const dateText = end && end !== start ? `${start} to ${end}` : start;
 
-      // FullCalendar stores event title/description in JS, never as innerHTML —
-      // these textContent assignments are safe by API contract.
       document.getElementById('modal-type').textContent = e.extendedProps.type;
       document.getElementById('modal-title').textContent = e.title;
       document.getElementById('modal-date').textContent = dateText;
@@ -154,7 +143,6 @@ export function refreshCalendarEvents() {
   applyFilters();
 }
 
-// ── Static listeners ────────────────────────────────────────────────────────
 document.querySelectorAll('.type-pill').forEach(btn => {
   btn.addEventListener('click', () => {
     const type = btn.dataset.value;

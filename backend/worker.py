@@ -1,9 +1,7 @@
-"""arq worker. Runs the Docling → score → prune → Ollama → validate pipeline
-off the request thread. Run with: `arq worker.WorkerSettings`."""
+"""arq worker — runs the extraction pipeline. Start with: arq worker.WorkerSettings"""
 from __future__ import annotations
 
-# Load .env BEFORE sibling imports — same reasoning as api.py: constants.py,
-# db.py, and redis_client.py all read env vars at import time.
+# load env before sibling imports read vars
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -31,7 +29,6 @@ from scorer import prune_blocks_to_context_limit, score_and_size_blocks
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Mirrors api.py — defense in depth on top of arq's job_timeout.
 DOCLING_TIMEOUT_SECONDS: int = int(os.environ.get("DOCLING_TIMEOUT_SECONDS", "500"))
 REDIS_URL: str = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
@@ -40,9 +37,7 @@ def _redis_settings_from_url(url: str) -> RedisSettings:
     return RedisSettings.from_dsn(url)
 
 
-# Validation helpers — duplicated from api.py so the worker has no runtime
-# dependency on the FastAPI app module. Keep these in sync if the patterns
-# change.
+# mirrors api.py — keep in sync
 _INJECTION_PATTERNS = re.compile(
     r"[^\n]*\b(?:ignore|disregard|forget|your instructions|system prompt"
     r"|/etc/|<script|eval\(|base64)\b[^\n]*",
@@ -72,8 +67,7 @@ def sanitize_extracted_text(text: str) -> str:
 
 
 class _LLMOutputError(Exception):
-    """LLM output failed validation. The worker writes a 'failed' state with
-    this message preserved."""
+    pass
 
 
 def validate_llm_output(data: dict) -> None:
@@ -94,8 +88,6 @@ def validate_llm_output(data: dict) -> None:
 
 
 def _run_extraction_with_timeout(tmp_path: str):
-    # ThreadPoolExecutor (not multiprocessing) avoids the cold-start cost of
-    # spawn() on Windows.
     with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
         future = executor.submit(extract_document, tmp_path)
         try:
@@ -104,8 +96,6 @@ def _run_extraction_with_timeout(tmp_path: str):
             raise _LLMOutputError("Processing timed out during extraction.")
 
 
-# The job
-
 async def process_syllabus(
     ctx: dict,
     job_id: str,
@@ -113,10 +103,7 @@ async def process_syllabus(
     safe_filename: str,
     user_id: str | None,
 ) -> dict:
-    """Run the extraction pipeline. user_id is the User UUID supplied by the
-    API at enqueue time, or None for guest uploads. Guest jobs skip the DB
-    insert — their parsed result lives only in Redis job state (TTL'd) and
-    in the requesting browser's memory. No persistence, by design."""
+    """Run extraction pipeline. Guest uploads (user_id=None) skip DB persist."""
     logger.info(
         "[%s] starting job for %s (user=%s)",
         job_id, safe_filename, user_id or "<guest>",
@@ -149,10 +136,7 @@ async def process_syllabus(
 
         validate_llm_output(parsed_json)
 
-        # Guests skip persistence entirely. Their result still flows back to
-        # the browser via /jobs/{id} (Redis state, TTL'd) — they just don't
-        # get a syllabus row, can't list it via /syllabi, and can't refresh
-        # to recover it. "Sign in to save" is the upgrade path.
+        # guests don't get a syllabus row
         if user_id is not None:
             async with AsyncSessionLocal() as session:
                 await session.execute(
@@ -165,8 +149,6 @@ async def process_syllabus(
                 )
                 await session.commit()
 
-        # Result shape matches the v1 synchronous /upload contract:
-        #   { "filename": str, "data": dict }
         result = {"filename": safe_filename, "data": parsed_json}
         await write_state(job_id, status="complete", phase="complete", result=result)
         logger.info("[%s] complete", job_id)
@@ -188,12 +170,7 @@ async def process_syllabus(
         raise
 
     finally:
-        # Release the per-IP concurrency slot. This is the PRIMARY release
-        # path — guaranteed to fire for any caught exception or successful
-        # completion. The API's GET /jobs/{id} also calls release on terminal
-        # status as a backstop for cases where this finally never runs (the
-        # worker process was killed). Both paths are idempotent via the
-        # slot_released marker inside release_job_slot.
+        # release the upload slot; api.py does this too as a fallback
         try:
             state = await read_state(job_id)
             uploader_ip = (state or {}).get("uploader_ip")
@@ -202,7 +179,6 @@ async def process_syllabus(
         except Exception:
             logger.exception("[%s] slot release failed", job_id)
 
-        # Worker owns the temp file from enqueue onward.
         try:
             if tmp_path and os.path.exists(tmp_path):
                 os.unlink(tmp_path)
@@ -213,12 +189,6 @@ async def process_syllabus(
 class WorkerSettings:
     functions = [process_syllabus]
     redis_settings = _redis_settings_from_url(REDIS_URL)
-
-    # Backstop for everything Docling's own timeout doesn't catch.
     job_timeout = DOCLING_TIMEOUT_SECONDS + 60
-
-    # Don't retry — extraction failures are deterministic (bad PDF / bad LLM
-    # output shape) and a retry just wastes ~60 s.
-    max_tries = 1
-
+    max_tries = 1  # retries don't help with bad PDFs
     keep_result = 60 * 60

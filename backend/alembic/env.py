@@ -1,7 +1,4 @@
-"""
-alembic env.py — pulls the URL from $DATABASE_URL (driver swapped to psycopg
-for the sync engine alembic uses) and the metadata from db_models.Base.
-"""
+"""alembic env — reads DATABASE_URL, swaps asyncpg→psycopg for the sync engine."""
 from __future__ import annotations
 
 import os
@@ -18,8 +15,6 @@ config = context.config
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# Override the alembic.ini URL with the live env var, mapping the asyncpg
-# driver string to the sync psycopg driver alembic expects.
 env_url = os.environ.get("DATABASE_URL")
 if env_url:
     config.set_main_option("sqlalchemy.url", env_url.replace("+asyncpg", "+psycopg", 1))

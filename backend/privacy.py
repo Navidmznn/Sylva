@@ -8,88 +8,86 @@ PRIVACY_MARKDOWN = """\
 
 Last updated: 2026-04-26
 
-This service ("syllabus.ai") parses university course syllabi you upload and
-visualizes the extracted information. This page describes exactly what data
-is stored, why, and how to remove it.
+syllabus.ai parses course syllabi you upload and turns them into a structured
+dashboard. This page covers what gets stored and how to remove it.
 
 ## What is stored
 
-* **Your email address.** Used as the sole identifier for your account.
-* **Sign-in tokens** (magic-link tokens and session tokens), stored only as
-  HMAC-SHA-256 hashes — the raw tokens are never persisted server-side.
-  Magic tokens are single-use; sessions live in an httpOnly cookie.
+* **Your email address.** Used to send sign-in links and tie saved syllabi to
+  your account. Nothing else.
+* **Sign-in and session tokens**, stored as HMAC-SHA-256 hashes only. The
+  raw token is never written to the database. Magic-link tokens are
+  single-use and expire after 15 minutes. Sessions live in an httpOnly cookie.
 * **Parsed syllabus data.** When you upload a PDF, the extracted course
-  information (title, code, instructor, assessments, schedule, weights) is
-  saved as structured JSON associated with your account. The original PDF
-  is **not** retained — it is deleted from temporary storage after extraction.
-* **Filenames** of uploaded PDFs (so you can identify your saved syllabi).
-* **Browser localStorage:** the same parsed JSON is also cached in your
-  browser so the UI can render instantly when you reload. Nothing else
-  about you is kept in localStorage.
-* **IP-derived rate-limit counters** (in Redis, ~1 hour TTL) used to throttle
-  abuse on `/upload` and `/auth/login`. Not associated with your account.
+  information (title, code, instructor, assessments, schedule, grade weights)
+  is saved as JSON on the server. The original PDF is deleted immediately
+  after extraction and is never retained.
+* **The filename** of each uploaded PDF, so your saved syllabi have a readable
+  label.
+* **A local browser cache** of the same parsed JSON, so the dashboard loads
+  instantly on revisit. Clearing your browser data removes this; it has no
+  effect on what's stored on the server.
+* **Short-lived rate-limit counters** tied to your IP address, kept in Redis
+  for roughly an hour. These are used to limit abuse on the upload and login
+  endpoints and are not linked to your account in any way.
 
 ## What is NOT stored
 
-* Passwords (there are none — sign-in is magic-link only).
-* The raw PDF you upload.
-* Any data sent to third-party AI providers — extraction runs through a
-  **local Ollama model**. Your PDF contents do not leave the host this
-  service runs on.
+* Passwords. There are none. Sign-in is magic-link only.
+* The PDF itself. It is deleted after the extraction step finishes.
+* Anything sent to a third-party AI service. All inference runs through a
+  **local Ollama model** on the same machine as the app. Your syllabus
+  contents never leave that host.
 
-## Why each item is stored
+## Why things are kept
 
-* Email — to send sign-in links and identify your saved syllabi.
-* Magic-token / session hashes — to authenticate you securely.
-* Parsed syllabus JSON — that is the product; without it the UI has nothing
-  to display.
-* Filenames — to label saved syllabi in your list.
-* Rate-limit counters — to prevent abuse.
+Your email is needed to send sign-in links and to scope your data so only
+you can see it. The token hashes are needed to authenticate you without
+storing anything that could be replayed if the database were ever read by
+someone else. The parsed JSON is the whole point of the app. Filenames are
+kept purely for display. Rate-limit counters exist to stop someone from
+hammering the upload endpoint.
 
 ## How long data is kept
 
-* **Sessions:** up to 30 days from sign-in, then auto-expire. Logging out
-  ends the session immediately.
-* **Magic-link tokens:** 15 minutes; deleted on first use.
-* **Syllabus JSON:** kept indefinitely until you delete it (or your account).
-* **Rate-limit counters:** about 1 hour.
-* **Account row:** kept until you trigger account deletion.
+* **Sessions** expire 30 days after sign-in. Logging out ends the session
+  right away.
+* **Magic-link tokens** expire after 15 minutes and are invalidated on first
+  use.
+* **Parsed syllabus JSON** is kept until you delete it or close your account.
+* **Rate-limit counters** expire after about an hour.
 
-## How to delete a single syllabus
+## Deleting a single syllabus
 
-In the app, open a course card and use the **Delete** button. This calls
-`DELETE /syllabi/{id}`, which removes only that syllabus from your account.
-Backend deletion is irreversible.
+Open the course card in the app and click **Delete**. This removes that
+syllabus from the server. It cannot be undone.
 
-## How to delete your account
+## Deleting your account
 
-In the app's account menu, choose **Delete account**. This calls
-`DELETE /account`, which:
+Choose **Delete account** from the account menu. This permanently deletes all
+your saved syllabi, revokes every active session and magic token, and removes
+your account. Your session cookie is cleared at the same time. There is no
+recovery after this.
 
-1. Deletes all your syllabi.
-2. Revokes all your active sessions and magic tokens.
-3. Deletes your user row.
-4. Clears your session cookie.
+## Clearing only the browser cache
 
-Account deletion is irreversible and immediate.
+The **Clear browser data** button removes the locally cached copy of your
+syllabi from this browser. It does not touch the server. Use **Delete account**
+if you want to remove your data from the backend as well.
 
-## How to clear browser-side data only
+## How PDF processing works
 
-The **Clear browser data** button in the app removes the cached parsed
-syllabi from your browser's localStorage. It does not touch the backend.
-Use **Delete account** above to remove backend data.
-
-## PDF processing
-
-Uploaded PDFs are written to a temporary file, parsed by Docling for text
-and table extraction, scored and pruned, then sent to a **locally running
-Ollama model** for structured extraction. The temp file is deleted in the
-worker's `finally` block whether extraction succeeds or fails.
+When you upload a file, it is written to a temporary location on disk and
+handed off to a background worker. The worker runs text and table extraction
+with Docling, scores and prunes the output to fit the model's context window,
+then calls a locally running Ollama model to produce structured JSON. Once
+extraction finishes, whether it succeeds or fails, the temp file is deleted.
+The structured result is validated against a schema before anything gets saved.
 
 ## Contact
 
-This is a self-hosted demo. If you are running it for someone else, fill in
-contact details here. If you are running it for yourself, that's you.
+This is a self-hosted project. If you are running it for others, add your
+contact details here.
 """
 
 

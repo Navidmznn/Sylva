@@ -1,4 +1,4 @@
-// Course info card and its course-select dropdown.
+// Course info card + course dropdown.
 
 import { courses } from './state.js';
 import { escapeHtml } from './utils.js';

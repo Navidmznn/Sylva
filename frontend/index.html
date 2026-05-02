@@ -46,12 +46,8 @@
         <a href="#grade-calc-section" class="nav-link">Grades</a>
       </nav>
 
-      <!-- Auth widget — populated by app.js::renderAuth.
-           Both panels start hidden; refreshAuth() reveals exactly one
-           after GET /auth/me resolves. -->
+      <!-- Auth widget — app.js::renderAuth sets data-state to show the right panel -->
       <div id="auth-widget" class="auth-widget" data-state="loading">
-        <!-- Guest badge — shown only when data-state="out". CSS-driven so
-             we don't need a third JS path; renderAuth() just sets data-state. -->
         <span class="auth-guest-pill" id="auth-guest-pill" title="Sign in to save your data across sessions">Guest</span>
         <!-- Logged-out form -->
         <form id="auth-login-form" class="auth-login-form" hidden>

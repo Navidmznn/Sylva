@@ -1,9 +1,4 @@
-"""SQLAlchemy engines + session helpers.
-
-Async engine for the FastAPI app and the worker (asyncpg). Sync engine
-exists only for alembic, which expects a synchronous engine. DATABASE_URL
-is the canonical source — we swap the driver suffix for the sync version.
-"""
+"""SQLAlchemy engines and session helpers. Async for the app, sync for alembic."""
 from __future__ import annotations
 
 import os
@@ -27,7 +22,6 @@ def _to_sync_url(url: str) -> str:
     return url.replace("+asyncpg", "+psycopg", 1)
 
 
-# Async engine — used by FastAPI and the worker.
 async_engine = create_async_engine(
     DATABASE_URL,
     pool_pre_ping=True,
@@ -42,8 +36,7 @@ AsyncSessionLocal = async_sessionmaker(
     class_=AsyncSession,
 )
 
-
-# Sync engine — alembic only.
+# alembic needs a sync engine
 sync_engine = create_engine(_to_sync_url(DATABASE_URL), pool_pre_ping=True, future=True)
 
 

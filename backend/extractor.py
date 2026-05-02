@@ -12,7 +12,7 @@ pdf_options = PdfPipelineOptions()
 device = AcceleratorDevice.CUDA if torch.cuda.is_available() else AcceleratorDevice.CPU
 pdf_options.accelerator_options = AcceleratorOptions(
     device=device,
-    num_threads=8
+    num_threads=8   
 )
 
 pdf_options.do_ocr = True
@@ -41,9 +41,7 @@ def extract_document(file):
 
     blocks = []
 
-    # iterate_items yields (item, level) tuples in newer docling versions
     for item, _ in doc.iterate_items():
-        # Compare against the enum directly instead of a fragile string like "table"
         if item.label == DocItemLabel.TABLE:
             text = extract_table_as_text(item).strip()
             if text:

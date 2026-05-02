@@ -1,13 +1,3 @@
-# Local-dev stack for syllabus.ai infra dependencies.
-#
-# Only Postgres and Redis run in containers. The FastAPI app and the arq
-# worker stay on the host because they need access to local Ollama (and
-# optionally CUDA for Docling).
-#
-# Up:    docker compose up -d
-# Down:  docker compose down
-# Wipe:  docker compose down -v   (drops the data volume)
-
 version: "3.9"
 
 services:

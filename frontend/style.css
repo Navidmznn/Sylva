@@ -114,7 +114,7 @@ body {
 }
 
 .header-inner {
-  max-width: 1200px;
+  max-width: 1400px;
   margin: 0 auto;
   padding: 0 24px;
   height: 72px;
@@ -127,6 +127,7 @@ body {
   display: flex;
   align-items: center;
   gap: 12px;
+  flex: 1;
 }
 
 .logo-icon {
@@ -157,6 +158,8 @@ body {
 .nav-links {
   display: flex;
   gap: 8px;
+  margin: 0 auto;
+  justify-content: center;
 }
 
 .nav-link {
@@ -286,91 +289,118 @@ body {
   box-shadow: 0 12px 50px var(--shadow-medium);
 }
 
-/* ─── Minimized state ────────────────────────────────────────────────────
-   When courses are present, the upload card compresses into a single strip
-   of notebook paper. Same dashed sage border, same red margin rule, same
-   paper rules running through — just shorter. The Caveat title stays
-   handwritten so it still feels written-on-the-page rather than a sterile
-   pill. The book-and-pencil illustration is overhead at this size, so it
-   collapses to zero with a fade. */
+/* minimized upload card — compact bar shown once a syllabus is loaded */
 .upload-card.is-minimized {
-  padding: 18px 28px 18px 88px;   /* extra left preserves the margin-red gutter */
-  min-height: 80px;                /* aligns with the 32px paper-rule grid */
+  padding: 0;
+  min-height: auto;
   display: flex;
   flex-direction: row;
-  align-items: center;
-  gap: 24px;
+  align-items: stretch;
+  gap: 0;
   text-align: left;
+  border: none;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(135deg, var(--white) 0%, var(--cream) 100%);
+  box-shadow: 0 4px 20px var(--shadow-soft), 0 1px 3px rgba(143, 184, 158, 0.1);
+  overflow: hidden;
 }
 
-/* The supplementary elements are gone in the minimized state. display: none
-   instead of max-height: 0 because in a flex ROW, max-height collapses
-   height but the elements still take horizontal width — which was eating
-   ~150px and squeezing the title to "Ad...". The card itself still
-   transitions (padding, min-height) so the change reads smoothly. */
+/* Remove the notebook paper lines in minimized state for cleaner look */
+.upload-card.is-minimized::before,
+.upload-card.is-minimized::after {
+  display: none;
+}
+
+/* The supplementary elements are gone in the minimized state */
 .upload-card.is-minimized .upload-illustration,
 .upload-card.is-minimized .upload-subtitle,
 .upload-card.is-minimized .upload-note {
   display: none;
 }
 
-/* Clear-saved-data button: in expanded mode it sits below as a tertiary
-   action. In minimized mode it ends up in the row, so we tame it: nowrap,
-   strip the top margin, keep it visually subordinate to the sage button. */
+/* Hide clear-data button in minimized — it's accessible via header anyway */
 .upload-card.is-minimized .clear-data-btn {
-  margin: 0;
-  padding: 8px 14px;
-  font-size: 12px;
-  white-space: nowrap;
-  flex-shrink: 0;
+  display: none;
 }
 
-/* Title stays handwritten — only the size and margin change. Caveat is
-   the whole point of this aesthetic; switching to a system font would
-   be the move that broke the design. */
+/* Left accent bar — subtle sage stripe for visual interest */
 .upload-card.is-minimized .upload-title {
-  font-size: 34px;
-  font-weight: 700;
-  line-height: 1;
+  position: relative;
+  display: flex;
+  align-items: center;
+  font-size: 22px;
+  font-weight: 600;
+  line-height: 1.3;
   margin: 0;
+  padding: 20px 24px 20px 28px;
   flex: 1 1 auto;
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  color: var(--sage-dark);     /* matches the section headers across the app */
+  color: var(--text-primary);
+  border-left: 4px solid var(--sage);
+  background: transparent;
 }
 
-/* Decorative pencil mark before the minimized title — picks up the red
-   margin rule and reads as a hand-annotation rather than UI chrome. */
+/* Small document icon before title instead of pencil emoji */
 .upload-card.is-minimized .upload-title__minimized::before {
-  content: '✎';
-  display: inline-block;
-  margin-right: 12px;
-  color: rgba(220, 120, 120, 0.85);   /* full-strength version of --margin-red */
-  font-size: 26px;
-  vertical-align: 2px;
-  transform: rotate(-8deg);
+  content: '';
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  margin-right: 14px;
+  background: var(--sage-light);
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='18' height='18' viewBox='0 0 24 24' fill='none' stroke='%236B9A7A' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z'/%3E%3Cpolyline points='14 2 14 8 20 8'/%3E%3Cline x1='16' y1='13' x2='8' y2='13'/%3E%3Cline x1='16' y1='17' x2='8' y2='17'/%3E%3Cpolyline points='10 9 9 9 8 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
 }
 
 .upload-title__expanded { display: inline; }
 .upload-title__minimized { display: none; }
 .upload-card.is-minimized .upload-title__expanded { display: none; }
-.upload-card.is-minimized .upload-title__minimized { display: inline; }
+.upload-card.is-minimized .upload-title__minimized { display: flex; align-items: center; }
 
-/* Button: tighter geometry, brand sage gradient preserved exactly. */
+/* Button: clean pill style on the right side */
 .upload-card.is-minimized .upload-btn {
-  padding: 12px 22px;
-  font-size: 15px;
+  padding: 0 28px;
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
   flex-shrink: 0;
-  box-shadow: 0 4px 14px rgba(111, 154, 122, 0.35);   /* slightly tamer than expanded */
+  border-radius: 0;
+  background: var(--sage);
+  box-shadow: none;
+  min-height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  transition: background 0.2s ease;
 }
 
-/* The card's own transition. Border stays dashed sage; only padding and
-   shadow shift, so the notebook character is preserved through the change. */
+.upload-card.is-minimized .upload-btn:hover {
+  background: var(--sage-dark);
+  transform: none;
+  box-shadow: none;
+}
+
+.upload-card.is-minimized .upload-btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Hover state for the whole minimized card */
+.upload-card.is-minimized:hover {
+  box-shadow: 0 6px 28px var(--shadow-medium), 0 2px 6px rgba(143, 184, 158, 0.15);
+  transform: translateY(-1px);
+}
+
+/* The card's own transition */
 .upload-card {
   transition: padding 0.4s ease, min-height 0.4s ease,
-              border-color 0.3s ease, box-shadow 0.3s ease;
+              border-color 0.3s ease, box-shadow 0.3s ease,
+              transform 0.2s ease, background 0.3s ease;
 }
 
 .upload-illustration {
@@ -2497,7 +2527,8 @@ body {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-left: auto;
+  flex: 1;
+  justify-content: flex-end;
 }
 
 /* Logged-out form */

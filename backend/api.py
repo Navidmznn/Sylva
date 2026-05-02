@@ -1,13 +1,5 @@
-"""FastAPI entry point. Magic-link auth, /upload, /jobs/{id}, /syllabi, /privacy.
-
-Note: no `from __future__ import annotations` here — stringified annotations
-break Pydantic v2's TypeAdapter resolution at OpenAPI build time.
-"""
-# Load .env BEFORE any sibling module is imported. constants.py, db.py,
-# redis_client.py, and auth.py all read env vars at import time, so doing
-# this later means those modules see the unset defaults. Keeping it at the
-# very top of the entry point is the simplest place where the order is
-# guaranteed.
+"""FastAPI app. Auth, upload, job polling, syllabus CRUD."""
+# load env before any other imports read env vars
 from dotenv import load_dotenv
 load_dotenv()
 
@@ -66,7 +58,6 @@ from redis_client import REDIS_URL, redis_client
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Constants
 MAX_FILE_SIZE = 20 * 1024 * 1024
 CHUNK_SIZE    = 1024 * 1024
 MAX_PAGES     = 80
@@ -91,12 +82,11 @@ _REJECT_PATTERNS = re.compile(
 _SHORT_FIELDS = {"course_title", "course_code", "section_code", "instructor",
                  "email", "office_hours", "term"}
 
-# Validates the body of PATCH /syllabi/{id}. Built once at import time so
-# every patch reuses the same compiled schema.
+# compiled once at startup
 _COURSES_ADAPTER: TypeAdapter[list[Course]] = TypeAdapter(list[Course])
 
 
-# Rate limiter — Redis-backed so limits survive multi-worker uvicorn.
+# redis-backed so limits are shared across workers
 limiter = Limiter(
     key_func=get_remote_address,
     storage_uri=REDIS_URL,
@@ -116,8 +106,7 @@ async def rate_limit_handler(request: Request, exc: RateLimitExceeded) -> JSONRe
     )
 
 
-# CORS: exact origin (not wildcard) because allow_credentials=True is
-# incompatible with allow_origins=["*"]. The session cookie needs credentials.
+# wildcard origin incompatible with credentials
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[FRONTEND_ORIGIN],
@@ -145,9 +134,7 @@ async def _close_arq_pool() -> None:
 @limiter.limit("5/minute")
 @limiter.limit("20/hour")
 async def auth_login(request: Request) -> dict:
-    """Request a magic link. Always returns the same payload regardless of
-    whether the email already has an account (anti-enumeration). Users are
-    auto-created on first contact."""
+    """Send magic link. Always 200 regardless of whether the email exists."""
     try:
         body = await request.json()
     except ValueError:
@@ -292,10 +279,7 @@ async def upload_syllabus(
     file: Annotated[UploadFile, File()],
     user: Optional[User] = Depends(get_current_user),
 ) -> dict:
-    """Guests can upload — the result lives only in Redis job state (TTL'd)
-    and the browser's memory. Signed-in users additionally get a Syllabus
-    row written from the worker so /syllabi survives a refresh.
-    Rate limits are IP-keyed, so guests share the same per-IP budget."""
+    """Accept upload, validate, enqueue. Guests skip DB persistence."""
     client_ip = get_remote_address(request)
     tmp_path, safe_filename = await _validate_pdf(file, dirpath=UPLOAD_TMPDIR)
 
@@ -331,42 +315,27 @@ async def get_job(
     request: Request,
     user: Optional[User] = Depends(get_current_user),
 ) -> dict:
-    """Authorization model:
-      - Signed-in user's job → caller must be that user.
-      - Guest job (user_id=None) → caller must be polling from the same IP
-        the upload came from.
-    Both checks collapse to a 404 to avoid disclosing job existence.
-    The job_id itself is 128 bits of entropy from uuid4().hex, so the
-    primary defense is unguessability; user/IP binding is defense-in-depth."""
+    """Poll job status. 404 for other users' jobs."""
     state = await read_state(job_id)
     if state is None:
         raise HTTPException(status_code=404, detail="Unknown job id.")
 
     job_user_id = state.get("user_id")
     if job_user_id is not None:
-        # Signed-in upload — only the owner can poll.
         if user is None or job_user_id != str(user.id):
             raise HTTPException(status_code=404, detail="Unknown job id.")
     else:
-        # Guest upload — bind to the uploader IP. Reject if the poll comes
-        # from a different IP than the one that uploaded. (Defense in depth;
-        # the random job_id is the real lock.)
         if state.get("uploader_ip") != get_remote_address(request):
             raise HTTPException(status_code=404, detail="Unknown job id.")
 
     if state["status"] in ("complete", "failed"):
-        # Backstop release. The worker's finally block is the primary path;
-        # this fires only if the worker died before reaching it. Idempotent —
-        # the marker inside release_job_slot ensures at most one decrement.
+        # release slot if worker didn't get a chance to
         ip_to_release = state.get("uploader_ip") or get_remote_address(request)
         await release_job_slot(job_id, ip_to_release)
 
-    # user_id and uploader_ip are internal bookkeeping; don't leak.
     return {k: v for k, v in state.items() if k not in ("user_id", "uploader_ip")}
 
 
-# Synchronous fallback. Kept as a parity oracle for the async pipeline.
-# Disable in production with UPLOAD_SYNC_ENABLED=false.
 @app.post("/upload-sync")
 @limiter.limit("5/minute")
 @limiter.limit("20/hour")
@@ -389,8 +358,6 @@ async def upload_syllabus_sync(
     client_ip = get_remote_address(request)
     tmp_path, safe_filename = await _validate_pdf(file)
 
-    # /upload-sync bypasses arq, so it has no real job_id. Synthesize one
-    # for the slot release marker — it's just a unique key, never persisted.
     sync_job_id = uuid.uuid4().hex
 
     try:
@@ -451,7 +418,6 @@ async def upload_syllabus_sync(
 
         _check(parsed_json, "root")
 
-        # Guests skip persistence — see /upload for the same pattern.
         if user is not None:
             async with AsyncSessionLocal() as session:
                 session.add(Syllabus(user_id=user.id, filename=safe_filename, data=parsed_json))
@@ -502,14 +468,7 @@ async def patch_syllabus(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_session),
 ) -> dict:
-    """Replace the courses array in a syllabus row. Used when the user deletes
-    one course from a multi-course PDF — the row survives with the rest.
-
-    The incoming `courses` is re-validated against the same Pydantic schema
-    the worker uses on insert (models.Course). Without this, an authenticated
-    user can PATCH arbitrary JSON of any size into their own JSONB row,
-    breaking the frontend's read path and bloating the row indefinitely.
-    """
+    """Update courses array on a syllabus row. Re-validates against schema."""
     try:
         sid = uuid.UUID(syllabus_id)
     except ValueError:
@@ -527,12 +486,10 @@ async def patch_syllabus(
     try:
         validated = _COURSES_ADAPTER.validate_python(raw_courses)
     except Exception:
-        # Don't echo Pydantic's full error tree — the field paths leak the
-        # internal schema shape. A generic 422 is enough.
+        # generic error — don't leak schema details
         raise HTTPException(status_code=422, detail="Invalid courses payload.")
     normalized = [c.model_dump() for c in validated]
 
-    # WHERE pinned to user_id — cross-user writes are impossible.
     result = await db.execute(
         select(Syllabus).where(Syllabus.id == sid, Syllabus.user_id == user.id)
     )
@@ -540,7 +497,6 @@ async def patch_syllabus(
     if row is None:
         raise HTTPException(status_code=404, detail="Not found.")
 
-    # Merge so other top-level keys in `data` are preserved.
     row.data = {**row.data, "courses": normalized}
     await db.commit()
     return {"updated": True}
@@ -559,7 +515,6 @@ async def delete_syllabus(
     except ValueError:
         raise HTTPException(status_code=404, detail="Not found.")
 
-    # 404 (not 403) when the row exists but belongs to another user.
     result = await db.execute(
         delete(Syllabus).where(Syllabus.id == sid, Syllabus.user_id == user.id)
     )
@@ -577,8 +532,6 @@ async def delete_account(
     user: User = Depends(require_user),
     db: AsyncSession = Depends(get_session),
 ) -> dict:
-    # FK cascade would handle this on User delete, but doing it explicitly is
-    # easier to reason about and keeps the order obvious.
     uid = user.id
     await db.execute(delete(Syllabus).where(Syllabus.user_id == uid))
     await db.execute(delete(SessionRow).where(SessionRow.user_id == uid))

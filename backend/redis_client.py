@@ -1,11 +1,4 @@
-"""Shared async Redis client. Used by api.py (job slots, state reads),
-worker.py (state writes), and slowapi (rate limits, via storage_uri).
-Single db=0; key prefixes separate concerns:
-  arq:*          — owned by arq itself
-  LIMITS:*       — owned by slowapi
-  job:<id>       — our job-state JSON blob
-  active_jobs:*  — our per-IP concurrency counter
-"""
+"""Shared async Redis client. Used for job state, per-IP slots, rate limits, and arq."""
 from __future__ import annotations
 
 import os
