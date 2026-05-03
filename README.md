@@ -5,7 +5,7 @@ grade weights, a calendar view, and a what-if grade calculator — all parsed
 locally with a self-hosted LLM. No third-party AI API. No data leaves your
 machine.
 
-> **Demo:** [YouTube ↗](#) &nbsp;|&nbsp; **Status:** Working locally, not yet
+> **Status:** Working locally, not yet publicly deployed. Demo video coming soon.
 > publicly deployed. See [Status & known limitations](#status--known-limitations).
 
 ---
