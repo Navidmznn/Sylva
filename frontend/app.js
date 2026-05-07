@@ -231,8 +231,21 @@ fileInput.addEventListener('change', async () => {
   uploadBtn.disabled = true;
   loadingModal.classList.add('show');
 
+  const loadingBarFill = document.getElementById('loading-bar-fill');
   const loadingSubtitle = document.getElementById('loading-subtitle');
   if (loadingSubtitle) loadingSubtitle.textContent = 'Reading your syllabus...';
+
+  // fake-progress bar: fills toward ~90% over ~12s, then jumps to 100% when done
+  loadingBarFill.classList.add('is-driven');
+  loadingBarFill.style.width = '0%';
+  const fakeStart = Date.now();
+  const fakeDuration = 12000;
+  const fakeProgressTimer = setInterval(() => {
+    const elapsed = Date.now() - fakeStart;
+    const t = Math.min(1, elapsed / fakeDuration);
+    const pct = 90 * (1 - Math.pow(1 - t, 2)); // ease-out, caps near 90
+    loadingBarFill.style.width = `${pct.toFixed(1)}%`;
+  }, 100);
 
   try {
     const formData = new FormData();
@@ -256,6 +269,10 @@ fileInput.addEventListener('change', async () => {
     if (!result || !result.data) {
       throw new Error('Server did not return a result payload.');
     }
+
+    // jump to 100% when the request actually completes
+    clearInterval(fakeProgressTimer);
+    loadingBarFill.style.width = '100%';
 
     const newCourses = result.data.courses;
     if (!newCourses || newCourses.length === 0) {
@@ -301,7 +318,10 @@ fileInput.addEventListener('change', async () => {
     console.error('[ERROR]', err);
     showToast(err.message || 'Something went wrong.', 'error');
   } finally {
+    clearInterval(fakeProgressTimer);
     loadingModal.classList.remove('show');
+    loadingBarFill.classList.remove('is-driven');
+    loadingBarFill.style.width = '';
     if (loadingSubtitle) loadingSubtitle.textContent = 'This takes about a minute. Grab a coffee!';
     uploadBtn.innerHTML = originalHTML;
     uploadBtn.disabled = false;
