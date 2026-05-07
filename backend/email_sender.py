@@ -26,7 +26,16 @@ SMTP_FROM: str = os.environ.get("SMTP_FROM", "no-reply@sylva.local")
 SMTP_USE_TLS: bool = os.environ.get("SMTP_USE_TLS", "true").lower() == "true"
 
 
-async def _send_resend(to_email: str, subject: str, body: str) -> None:
+async def _send_resend(to_email: str, subject: str, body: str, html: str | None = None) -> None:
+    payload = {
+        "from": RESEND_FROM,
+        "to": [to_email],
+        "subject": subject,
+        "text": body,
+    }
+    if html:
+        payload["html"] = html
+
     async with httpx.AsyncClient(timeout=15) as client:
         response = await client.post(
             "https://api.resend.com/emails",
@@ -34,14 +43,64 @@ async def _send_resend(to_email: str, subject: str, body: str) -> None:
                 "Authorization": f"Bearer {RESEND_API_KEY}",
                 "Content-Type": "application/json",
             },
-            json={
-                "from": RESEND_FROM,
-                "to": [to_email],
-                "subject": subject,
-                "text": body,
-            },
+            json=payload,
         )
         response.raise_for_status()
+
+
+def _build_magic_link_html(link: str) -> str:
+    return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"></head>
+<body style="margin:0;padding:0;background-color:#FDF8F3;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background-color:#FDF8F3;padding:48px 16px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="480" cellpadding="0" cellspacing="0" border="0" style="background-color:#FFFFFF;border-radius:16px;border:1px solid #E6DFD3;box-shadow:0 4px 20px rgba(143,184,158,0.08);padding:40px;max-width:480px;">
+          <tr>
+            <td>
+              <div style="margin-bottom:32px;">
+                <h1 style="margin:0;font-size:34px;font-weight:700;color:#6F9A7A;letter-spacing:-0.5px;">Sylva</h1>
+                <p style="margin:4px 0 0;font-size:13px;color:#A0958A;">Your College Companion</p>
+              </div>
+
+              <h2 style="margin:0 0 12px;font-size:22px;font-weight:600;color:#3D3D3D;">Sign in to Sylva</h2>
+              <p style="margin:0 0 28px;font-size:16px;line-height:1.5;color:#5A5A5A;">
+                Click the button below to sign in. This link is single-use and expires in 15 minutes.
+              </p>
+
+              <table role="presentation" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 28px;">
+                <tr>
+                  <td style="background-color:#8FB89E;border-radius:10px;">
+                    <a href="{link}" style="display:inline-block;padding:14px 32px;color:#FFFFFF;font-size:15px;font-weight:600;text-decoration:none;letter-spacing:0.2px;">Sign in to Sylva &rarr;</a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 8px;font-size:13px;color:#999;">
+                Or copy and paste this URL into your browser:
+              </p>
+              <p style="margin:0;font-size:12px;line-height:1.5;word-break:break-all;">
+                <a href="{link}" style="color:#6F9A7A;text-decoration:none;">{link}</a>
+              </p>
+
+              <hr style="border:none;border-top:1px solid #E6DFD3;margin:32px 0 24px;">
+
+              <p style="margin:0;font-size:13px;line-height:1.5;color:#A0958A;">
+                Didn't request this? You can safely ignore this email.
+              </p>
+            </td>
+          </tr>
+        </table>
+
+        <p style="margin:24px 0 0;font-size:12px;color:#A0958A;">
+          Sylva &middot; Made with care for students everywhere
+        </p>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"""
 
 
 def _send_smtp_blocking(to_email: str, subject: str, body: str) -> None:
@@ -72,14 +131,15 @@ async def send_magic_link_email(to_email: str, link: str) -> None:
     body = (
         "Hi,\n\n"
         "Click the link below to sign in to Sylva. The link is single-use\n"
-        "and will expire shortly.\n\n"
+        "and expires in 15 minutes.\n\n"
         f"{link}\n\n"
         "If you didn't request this, you can safely ignore this email.\n"
     )
+    html = _build_magic_link_html(link)
 
     if EMAIL_MODE == "resend" and RESEND_API_KEY:
         try:
-            await _send_resend(to_email, subject, body)
+            await _send_resend(to_email, subject, body, html)
             logger.info("Magic link sent to %s via Resend", to_email)
             return
         except Exception:
