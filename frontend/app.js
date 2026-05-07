@@ -16,7 +16,9 @@ import { renderGradeCalc } from './gradeCalc.js';
 import { showToast, showConfirm } from './utils.js';
 
 // wrapper so credentials always ride along
-const API_BASE = 'http://localhost:8000';
+const API_BASE = (location.hostname === 'localhost' || location.hostname === '127.0.0.1')
+  ? 'http://localhost:8000'
+  : 'https://sylva-production-2d10.up.railway.app';
 
 async function apiFetch(path, { method = 'GET', body, headers, parseJson = true } = {}) {
   const opts = {
