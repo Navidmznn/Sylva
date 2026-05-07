@@ -398,7 +398,7 @@ authLoginForm.addEventListener('submit', async (e) => {
 
   try {
     await apiFetch('/auth/login', { method: 'POST', body: { email } });
-    showToast('Check your email for a sign-in link. (In dev mode, check the API console.)', 'success', 7000);
+    showToast('Check your email for a sign-in link.', 'success', 7000);
     authEmailIn.value = '';
   } catch (e) {
     showToast(e.message || 'Could not send link.', 'error');
