@@ -231,19 +231,16 @@ fileInput.addEventListener('change', async () => {
   uploadBtn.disabled = true;
   loadingModal.classList.add('show');
 
-  const loadingBarFill = document.getElementById('loading-bar-fill');
   const loadingSubtitle = document.getElementById('loading-subtitle');
-  loadingBarFill.classList.add('is-driven');
-  loadingBarFill.style.width = '0%';
-  if (loadingSubtitle) loadingSubtitle.textContent = 'Uploading...';
+  if (loadingSubtitle) loadingSubtitle.textContent = 'Reading your syllabus...';
 
   try {
     const formData = new FormData();
     formData.append('file', file);
 
-    let enqueue;
+    let result;
     try {
-      enqueue = await apiFetch('/upload', { method: 'POST', body: formData });
+      result = await apiFetch('/upload-sync', { method: 'POST', body: formData });
     } catch (e) {
       if (e.status === 401) {
         await refreshAuth();
@@ -255,20 +252,9 @@ fileInput.addEventListener('change', async () => {
       }
       throw e;
     }
-    if (!enqueue?.job_id) throw new Error('Server did not return a job id.');
-
-    const result = await pollJobUntilDone(enqueue.job_id, {
-      intervalMs: 2000,
-      onProgress: (state) => {
-        if (typeof state.progress === 'number') {
-          loadingBarFill.style.width = `${Math.max(2, Math.min(100, state.progress))}%`;
-        }
-        if (state.phase && loadingSubtitle) loadingSubtitle.textContent = state.phase;
-      },
-    });
 
     if (!result || !result.data) {
-      throw new Error('Job finished without a result payload.');
+      throw new Error('Server did not return a result payload.');
     }
 
     const newCourses = result.data.courses;
@@ -316,43 +302,12 @@ fileInput.addEventListener('change', async () => {
     showToast(err.message || 'Something went wrong.', 'error');
   } finally {
     loadingModal.classList.remove('show');
-    loadingBarFill.classList.remove('is-driven');
-    loadingBarFill.style.width = '';
     if (loadingSubtitle) loadingSubtitle.textContent = 'This takes about a minute. Grab a coffee!';
     uploadBtn.innerHTML = originalHTML;
     uploadBtn.disabled = false;
     fileInput.value = '';
   }
 });
-
-// poll until done — sequential awaits avoid overlapping requests
-async function pollJobUntilDone(jobId, { intervalMs = 2000, onProgress } = {}) {
-  const HARD_TIMEOUT_MS = 15 * 60 * 1000;
-  const started = Date.now();
-
-  while (true) {
-    if (Date.now() - started > HARD_TIMEOUT_MS) {
-      throw new Error('Processing timed out. Please try again.');
-    }
-
-    const res = await fetch(`${API_BASE}/jobs/${encodeURIComponent(jobId)}`, {
-      credentials: 'include',
-    });
-    if (res.status === 404) throw new Error('Job not found — may have expired.');
-    if (!res.ok) {
-      const err = await res.json().catch(() => ({}));
-      throw new Error(err.detail || `Server returned ${res.status} while polling.`);
-    }
-
-    const state = await res.json();
-    if (typeof onProgress === 'function') onProgress(state);
-
-    if (state.status === 'complete') return state.result;
-    if (state.status === 'failed')   throw new Error(state.error || 'Processing failed.');
-
-    await new Promise(r => setTimeout(r, intervalMs));
-  }
-}
 
 // re-render only the assessment-related views after an edit
 window.addEventListener('sylva:assessmentupdated', () => {
