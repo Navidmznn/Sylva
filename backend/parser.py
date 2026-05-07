@@ -1,13 +1,15 @@
+import os
 import re
+
 import httpx
 
 from constants import (
     SYSTEM_PROMPT,
     USER_PROMPT,
     USER_PROMPT_SUFFIX,
-    OLLAMA_MODEL,
-    OLLAMA_URL,
-    OLLAMA_TIMEOUT,
+    GEMINI_API_URL,
+    GEMINI_MODEL,
+    GEMINI_TIMEOUT,
 )
 
 
@@ -40,42 +42,39 @@ def build_syllabus_prompt(extracted_text: str) -> str:
     return USER_PROMPT + safe_text + USER_PROMPT_SUFFIX
 
 
-async def word_parser(extracted_text: str, context_size: int) -> str:
+async def word_parser(extracted_text: str) -> str:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        raise RuntimeError("GEMINI_API_KEY is not set")
+
     prompt = build_syllabus_prompt(extracted_text)
 
-    # don't let a stuck model hang forever
-    timeout = httpx.Timeout(
-        timeout=float(OLLAMA_TIMEOUT),
-        connect=10.0,
-        read=float(OLLAMA_TIMEOUT),
-        write=30.0,
-        pool=10.0,
-    )
-
-    async with httpx.AsyncClient(timeout=timeout) as client:
+    async with httpx.AsyncClient(timeout=GEMINI_TIMEOUT) as client:
         response = await client.post(
-            f"{OLLAMA_URL}/api/chat",
+            f"{GEMINI_API_URL}/models/{GEMINI_MODEL}:generateContent",
+            headers={
+                "x-goog-api-key": api_key,
+                "Content-Type": "application/json",
+            },
             json={
-                "model": OLLAMA_MODEL,
-                "format": "json",
-                "stream": False,
-                "options": {
-                    "num_ctx": context_size,
-                    "temperature": 0,
+                "systemInstruction": {
+                    "parts": [{"text": SYSTEM_PROMPT}],
                 },
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user",   "content": prompt},
+                "contents": [
+                    {"role": "user", "parts": [{"text": prompt}]},
                 ],
+                "generationConfig": {
+                    "temperature": 0,
+                    "responseMimeType": "application/json",
+                },
             },
         )
         response.raise_for_status()
 
         payload = response.json()
-
         try:
-            raw = payload["message"]["content"]
-        except KeyError:
-            raise ValueError("Ollama response did not contain message.content")
+            raw = payload["candidates"][0]["content"]["parts"][0]["text"]
+        except (KeyError, IndexError):
+            raise ValueError("Gemini response missing candidates/content/parts")
 
         return strip_code_fences(raw)

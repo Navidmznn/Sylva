@@ -137,9 +137,13 @@ CONTEXT_SIZES = {
 
 MIN_BLOCK_LINES = 2
 
-OLLAMA_TIMEOUT = 900
-OLLAMA_MODEL = "qwen3:8b"
-OLLAMA_URL = "http://localhost:11434"
+MISTRAL_API_URL = "https://api.mistral.ai/v1"
+MISTRAL_OCR_MODEL = "mistral-ocr-latest"
+MISTRAL_TIMEOUT = 120
+
+GEMINI_API_URL = "https://generativelanguage.googleapis.com/v1beta"
+GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_TIMEOUT = 60
 
 SYSTEM_PROMPT = """
 You are a university syllabus parser. You read course syllabi and return structured JSON. You do nothing else.

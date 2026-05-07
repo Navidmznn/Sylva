@@ -120,7 +120,7 @@ async def process_syllabus(
         full_text = sanitize_extracted_text(raw_text)
 
         await write_state(job_id, status="running", phase="parsing")
-        raw_result = await word_parser(full_text, CONTEXT_SIZES["fast"])
+        raw_result = await word_parser(full_text)
 
         try:
             parsed_json = json.loads(raw_result)

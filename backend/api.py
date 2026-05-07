@@ -389,7 +389,7 @@ async def upload_syllabus_sync(
         )
         full_text = _INJECTION_PATTERNS.sub("", text).strip()
 
-        raw_result = await word_parser(full_text, CONTEXT_SIZES["fast"])
+        raw_result = await word_parser(full_text)
         try:
             parsed_json = _json.loads(raw_result)
         except _json.JSONDecodeError:
