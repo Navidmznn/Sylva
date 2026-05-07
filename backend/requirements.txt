@@ -25,5 +25,8 @@ alembic>=1.13
 arq>=0.26
 redis>=5.0
 
-# extraction — docling and torch aren't pinned here, install separately if needed
+# tokenizer (used by block.py for context-size estimation)
+tiktoken>=0.7
+
+# extraction — docling and torch only needed for the local branch
 # pip install docling torch
